@@ -32,7 +32,7 @@ type Vehicle struct {
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Relationship
-	Device Device `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI"`
+	Device Device `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
 }
 
 // TableName specifies the table name for Vehicle model

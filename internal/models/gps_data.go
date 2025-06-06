@@ -58,8 +58,8 @@ type GPSData struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// Relationships
-	Device  Device  `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI"`
-	Vehicle Vehicle `json:"vehicle,omitempty" gorm:"foreignKey:IMEI;references:IMEI"`
+	Device  Device  `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Vehicle Vehicle `json:"vehicle,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 // TableName specifies the table name for GPSData model

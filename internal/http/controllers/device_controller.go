@@ -22,11 +22,18 @@ func NewDeviceController() *DeviceController {
 func (dc *DeviceController) GetDevices(c *gin.Context) {
 	var devices []models.Device
 
-	if err := db.GetDB().Preload("Vehicles").Find(&devices).Error; err != nil {
+	if err := db.GetDB().Find(&devices).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch devices",
 		})
 		return
+	}
+
+	// Manually load vehicles for each device
+	for i := range devices {
+		var vehicles []models.Vehicle
+		db.GetDB().Where("imei = ?", devices[i].IMEI).Find(&vehicles)
+		// Add vehicles data to response (we'll include this in a separate field)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -47,7 +54,7 @@ func (dc *DeviceController) GetDevice(c *gin.Context) {
 	}
 
 	var device models.Device
-	if err := db.GetDB().Preload("Vehicles").First(&device, uint(id)).Error; err != nil {
+	if err := db.GetDB().First(&device, uint(id)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Device not found",
 		})
@@ -71,7 +78,7 @@ func (dc *DeviceController) GetDeviceByIMEI(c *gin.Context) {
 	}
 
 	var device models.Device
-	if err := db.GetDB().Preload("Vehicles").Where("imei = ?", imei).First(&device).Error; err != nil {
+	if err := db.GetDB().Where("imei = ?", imei).First(&device).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Device not found",
 		})

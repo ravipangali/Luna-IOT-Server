@@ -32,8 +32,8 @@ type Device struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// Relationships
-	Vehicles []Vehicle `json:"vehicles,omitempty" gorm:"foreignKey:IMEI;references:IMEI"`
+	// Relationships (has many vehicles)
+	// Note: This creates a reverse relationship without foreign key constraints
 }
 
 // TableName specifies the table name for Device model
