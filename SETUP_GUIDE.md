@@ -33,12 +33,12 @@ Create a `.env` file in the project root directory:
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
-DB_PASSWORD=your_password_here
+DB_PASSWORD=Luna@#$321
 DB_NAME=luna_iot
 DB_SSL_MODE=disable
 
 # Server Configuration
-HTTP_PORT=8080
+HTTP_PORT=9000
 TCP_PORT=5000
 ```
 
