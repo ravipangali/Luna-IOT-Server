@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"log"
+	"luna_iot_server/config"
 	"luna_iot_server/internal/models"
 	"strings"
 
@@ -15,9 +16,10 @@ var DB *gorm.DB
 
 // Initialize establishes database connection and runs migrations
 func Initialize() error {
-	// dbConfig := config.GetDatabaseConfig()
-	// dsn := dbConfig.GetDSN()
-	dsn := "host=84.247.131.246 port=5433 user=luna role=luna password=Luna@#$321 dbname=luna_iot sslmode=disable"
+	dbConfig := config.GetDatabaseConfig()
+	dsn := dbConfig.GetDSN()
+	fmt.Println("DSN:", dsn)
+	// dsn := "host=84.247.131.246 port=5433 user=luna role=luna password=Luna@#$321 dbname=luna_iot sslmode=disable"
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
