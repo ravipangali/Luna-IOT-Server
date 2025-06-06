@@ -13,6 +13,13 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// isDeviceRegistered checks if a device with given IMEI exists in the database
+func isDeviceRegistered(imei string) bool {
+	var device models.Device
+	err := db.GetDB().Where("imei = ?", imei).First(&device).Error
+	return err == nil
+}
+
 // saveGPSData saves GPS packet data to database
 func saveGPSData(packet *protocol.DecodedPacket) error {
 	if packet == nil {
@@ -24,6 +31,11 @@ func saveGPSData(packet *protocol.DecodedPacket) error {
 	if packet.ProtocolName == "LOGIN" && packet.TerminalID != "" {
 		// TerminalID is hex encoded, convert to decimal IMEI
 		imei = packet.TerminalID
+
+		// Validate device exists in database before processing
+		if !isDeviceRegistered(imei) {
+			return fmt.Errorf("IMEI %s is not registered on our system", imei)
+		}
 	} else {
 		// For other packets, we need to track the IMEI from login
 		// This is a simplified approach - in production, you'd track by connection
@@ -179,9 +191,23 @@ func handleConnection(conn net.Conn) {
 					fmt.Printf("Device login from %s - Terminal ID: %s\n",
 						conn.RemoteAddr(), packet.TerminalID)
 
-					// Convert hex terminal ID to IMEI and store for this connection
+					// Convert hex terminal ID to IMEI and validate device exists
 					if len(packet.TerminalID) >= 15 {
-						deviceIMEI = packet.TerminalID[:15]
+						potentialIMEI := packet.TerminalID[:15]
+
+						// Check if device exists in database
+						if !isDeviceRegistered(potentialIMEI) {
+							log.Printf("Unauthorized device attempted login from %s - IMEI: %s (not registered)",
+								conn.RemoteAddr(), potentialIMEI)
+							fmt.Printf("⚠️  Rejecting unregistered device: %s\n", potentialIMEI)
+							// Close connection for unregistered devices
+							conn.Close()
+							return
+						}
+
+						// Device is registered, allow connection
+						deviceIMEI = potentialIMEI
+						fmt.Printf("✅ Authorized device login: %s\n", deviceIMEI)
 					}
 
 				case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
@@ -190,8 +216,13 @@ func handleConnection(conn net.Conn) {
 							conn.RemoteAddr(), *packet.Latitude, *packet.Longitude, packet.Speed)
 					}
 
-					// Save GPS data to database if we have device IMEI
+					// Save GPS data to database if we have device IMEI and device is still registered
 					if deviceIMEI != "" {
+						// Verify device still exists before saving GPS data
+						if !isDeviceRegistered(deviceIMEI) {
+							log.Printf("IMEI %s is not registered on our system", deviceIMEI)
+							continue
+						}
 						gpsData := models.GPSData{
 							IMEI:         deviceIMEI,
 							Timestamp:    packet.Timestamp,
@@ -247,8 +278,13 @@ func handleConnection(conn net.Conn) {
 					fmt.Printf("Status info from %s: Ignition=%s, Voltage=%v, GSM Signal=%v\n",
 						conn.RemoteAddr(), packet.Ignition, packet.Voltage, packet.GSMSignal)
 
-					// Save status data to database if we have device IMEI
+					// Save status data to database if we have device IMEI and device is still registered
 					if deviceIMEI != "" {
+						// Verify device still exists before saving status data
+						if !isDeviceRegistered(deviceIMEI) {
+							log.Printf("IMEI %s is not registered on our system", deviceIMEI)
+							continue
+						}
 						gpsData := models.GPSData{
 							IMEI:           deviceIMEI,
 							Timestamp:      packet.Timestamp,
@@ -297,6 +333,9 @@ func handleConnection(conn net.Conn) {
 
 				// Send response if required
 				if packet.NeedsResponse {
+					imei := packet.TerminalID
+					fmt.Println("IMEI:", imei)
+
 					response := decoder.GenerateResponse(uint16(packet.SerialNumber), packet.Protocol)
 
 					_, err := conn.Write(response)
