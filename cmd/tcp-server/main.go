@@ -329,7 +329,7 @@ func main() {
 		port = "5000"
 	}
 
-	listener, err := net.Listen("tcp", ":5000")
+	listener, err := net.Listen("tcp", "84.247.131.246:5000")
 	if err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
