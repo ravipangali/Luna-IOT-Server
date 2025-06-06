@@ -8,119 +8,122 @@ import (
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
 	"net"
+	"os"
+
+	"github.com/joho/godotenv"
 )
 
 // saveGPSData saves GPS packet data to database
-// func saveGPSData(packet *protocol.DecodedPacket) error {
-// 	if packet == nil {
-// 		return nil
-// 	}
+func saveGPSData(packet *protocol.DecodedPacket) error {
+	if packet == nil {
+		return nil
+	}
 
-// 	// Extract IMEI from TerminalID for LOGIN packets, or use stored IMEI
-// 	var imei string
-// 	if packet.ProtocolName == "LOGIN" && packet.TerminalID != "" {
-// 		// TerminalID is hex encoded, convert to decimal IMEI
-// 		imei = packet.TerminalID
-// 	} else {
-// 		// For other packets, we need to track the IMEI from login
-// 		// This is a simplified approach - in production, you'd track by connection
-// 		return nil
-// 	}
+	// Extract IMEI from TerminalID for LOGIN packets, or use stored IMEI
+	var imei string
+	if packet.ProtocolName == "LOGIN" && packet.TerminalID != "" {
+		// TerminalID is hex encoded, convert to decimal IMEI
+		imei = packet.TerminalID
+	} else {
+		// For other packets, we need to track the IMEI from login
+		// This is a simplified approach - in production, you'd track by connection
+		return nil
+	}
 
-// 	// Only save GPS data packets
-// 	if packet.ProtocolName != "GPS_LBS_STATUS" &&
-// 		packet.ProtocolName != "GPS_LBS_DATA" &&
-// 		packet.ProtocolName != "GPS_LBS_STATUS_A0" &&
-// 		packet.ProtocolName != "STATUS_INFO" {
-// 		return nil
-// 	}
+	// Only save GPS data packets
+	if packet.ProtocolName != "GPS_LBS_STATUS" &&
+		packet.ProtocolName != "GPS_LBS_DATA" &&
+		packet.ProtocolName != "GPS_LBS_STATUS_A0" &&
+		packet.ProtocolName != "STATUS_INFO" {
+		return nil
+	}
 
-// 	gpsData := models.GPSData{
-// 		IMEI:         imei,
-// 		Timestamp:    packet.Timestamp,
-// 		ProtocolName: packet.ProtocolName,
-// 		RawPacket:    packet.Raw,
-// 	}
+	gpsData := models.GPSData{
+		IMEI:         imei,
+		Timestamp:    packet.Timestamp,
+		ProtocolName: packet.ProtocolName,
+		RawPacket:    packet.Raw,
+	}
 
-// 	// GPS Location Data
-// 	if packet.Latitude != nil {
-// 		gpsData.Latitude = packet.Latitude
-// 	}
-// 	if packet.Longitude != nil {
-// 		gpsData.Longitude = packet.Longitude
-// 	}
-// 	if packet.Speed != nil {
-// 		speed := int(*packet.Speed)
-// 		gpsData.Speed = &speed
-// 	}
-// 	if packet.Course != nil {
-// 		course := int(*packet.Course)
-// 		gpsData.Course = &course
-// 	}
-// 	if packet.Satellites != nil {
-// 		satellites := int(*packet.Satellites)
-// 		gpsData.Satellites = &satellites
-// 	}
+	// GPS Location Data
+	if packet.Latitude != nil {
+		gpsData.Latitude = packet.Latitude
+	}
+	if packet.Longitude != nil {
+		gpsData.Longitude = packet.Longitude
+	}
+	if packet.Speed != nil {
+		speed := int(*packet.Speed)
+		gpsData.Speed = &speed
+	}
+	if packet.Course != nil {
+		course := int(*packet.Course)
+		gpsData.Course = &course
+	}
+	if packet.Satellites != nil {
+		satellites := int(*packet.Satellites)
+		gpsData.Satellites = &satellites
+	}
 
-// 	// GPS Status
-// 	if packet.GPSRealTime != nil {
-// 		gpsData.GPSRealTime = packet.GPSRealTime
-// 	}
-// 	if packet.GPSPositioned != nil {
-// 		gpsData.GPSPositioned = packet.GPSPositioned
-// 	}
+	// GPS Status
+	if packet.GPSRealTime != nil {
+		gpsData.GPSRealTime = packet.GPSRealTime
+	}
+	if packet.GPSPositioned != nil {
+		gpsData.GPSPositioned = packet.GPSPositioned
+	}
 
-// 	// Device Status
-// 	gpsData.Ignition = packet.Ignition
-// 	gpsData.Charger = packet.Charger
-// 	gpsData.GPSTracking = packet.GPSTracking
-// 	gpsData.OilElectricity = packet.OilElectricity
-// 	gpsData.DeviceStatus = packet.DeviceStatus
+	// Device Status
+	gpsData.Ignition = packet.Ignition
+	gpsData.Charger = packet.Charger
+	gpsData.GPSTracking = packet.GPSTracking
+	gpsData.OilElectricity = packet.OilElectricity
+	gpsData.DeviceStatus = packet.DeviceStatus
 
-// 	// Signal & Power
-// 	if packet.Voltage != nil {
-// 		voltageLevel := int(packet.Voltage.Level)
-// 		gpsData.VoltageLevel = &voltageLevel
-// 		gpsData.VoltageStatus = packet.Voltage.Status
-// 	}
-// 	if packet.GSMSignal != nil {
-// 		gsmSignal := int(packet.GSMSignal.Level)
-// 		gpsData.GSMSignal = &gsmSignal
-// 		gpsData.GSMStatus = packet.GSMSignal.Status
-// 	}
+	// Signal & Power
+	if packet.Voltage != nil {
+		voltageLevel := int(packet.Voltage.Level)
+		gpsData.VoltageLevel = &voltageLevel
+		gpsData.VoltageStatus = packet.Voltage.Status
+	}
+	if packet.GSMSignal != nil {
+		gsmSignal := int(packet.GSMSignal.Level)
+		gpsData.GSMSignal = &gsmSignal
+		gpsData.GSMStatus = packet.GSMSignal.Status
+	}
 
-// 	// LBS Data
-// 	if packet.MCC != nil {
-// 		mcc := int(*packet.MCC)
-// 		gpsData.MCC = &mcc
-// 	}
-// 	if packet.MNC != nil {
-// 		mnc := int(*packet.MNC)
-// 		gpsData.MNC = &mnc
-// 	}
-// 	if packet.LAC != nil {
-// 		lac := int(*packet.LAC)
-// 		gpsData.LAC = &lac
-// 	}
-// 	if packet.CellID != nil {
-// 		cellID := int(*packet.CellID)
-// 		gpsData.CellID = &cellID
-// 	}
+	// LBS Data
+	if packet.MCC != nil {
+		mcc := int(*packet.MCC)
+		gpsData.MCC = &mcc
+	}
+	if packet.MNC != nil {
+		mnc := int(*packet.MNC)
+		gpsData.MNC = &mnc
+	}
+	if packet.LAC != nil {
+		lac := int(*packet.LAC)
+		gpsData.LAC = &lac
+	}
+	if packet.CellID != nil {
+		cellID := int(*packet.CellID)
+		gpsData.CellID = &cellID
+	}
 
-// 	// Alarm Data
-// 	if packet.Alarm != nil {
-// 		gpsData.AlarmActive = packet.Alarm.Active
-// 		gpsData.AlarmType = packet.Alarm.Type
-// 		gpsData.AlarmCode = packet.Alarm.Code
-// 	}
+	// Alarm Data
+	if packet.Alarm != nil {
+		gpsData.AlarmActive = packet.Alarm.Active
+		gpsData.AlarmType = packet.Alarm.Type
+		gpsData.AlarmCode = packet.Alarm.Code
+	}
 
-// 	// Save to database
-// 	if err := db.GetDB().Create(&gpsData).Error; err != nil {
-// 		return fmt.Errorf("failed to save GPS data: %v", err)
-// 	}
+	// Save to database
+	if err := db.GetDB().Create(&gpsData).Error; err != nil {
+		return fmt.Errorf("failed to save GPS data: %v", err)
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
@@ -310,30 +313,30 @@ func handleConnection(conn net.Conn) {
 
 func main() {
 	// Load environment variables from .env file
-	// if err := godotenv.Load(); err != nil {
-	// 	log.Println("No .env file found, using system environment variables")
-	// }
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment variables")
+	}
 
 	// Initialize database connection
-	// if err := db.Initialize(); err != nil {
-	// 	log.Fatalf("Failed to initialize database: %v", err)
-	// }
-	// defer db.Close()
+	if err := db.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
 
 	// Get TCP port from environment variable or use default
-	// port := os.Getenv("TCP_PORT")
-	// if port == "" {
-	// 	port = "5000"
-	// }
+	port := os.Getenv("TCP_PORT")
+	if port == "" {
+		port = "5000"
+	}
 
-	listener, err := net.Listen("tcp", "84.247.131.246:5000")
+	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 
 	defer listener.Close()
 
-	fmt.Printf("GT06 TCP Server is running on port %s\n", "84.247.131.246:5000")
+	fmt.Printf("GT06 TCP Server is running on port %s\n", port)
 	fmt.Println("Waiting for GT06 device connections...")
 	fmt.Println("Database connectivity enabled - GPS data will be saved")
 
