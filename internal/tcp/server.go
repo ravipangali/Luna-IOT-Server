@@ -144,8 +144,8 @@ func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn
 	colors.PrintConnection("🔐", "Device login from %s - Terminal ID: %s", conn.RemoteAddr(), packet.TerminalID)
 
 	// Convert hex terminal ID to IMEI and validate device exists
-	if len(packet.TerminalID) >= 15 {
-		potentialIMEI := packet.TerminalID[:15]
+	if len(packet.TerminalID) >= 16 {
+		potentialIMEI := packet.TerminalID[:16]
 
 		// Check if device exists in database
 		if !s.isDeviceRegistered(potentialIMEI) {
