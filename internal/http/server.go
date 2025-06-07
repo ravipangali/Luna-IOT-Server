@@ -2,6 +2,7 @@ package http
 
 import (
 	"luna_iot_server/pkg/colors"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,11 +15,17 @@ type Server struct {
 
 // NewServer creates a new HTTP server instance
 func NewServer(port string) *Server {
+	// Set Gin to release mode to reduce debug output
+	gin.SetMode(gin.ReleaseMode)
+
 	// Create Gin router
 	router := gin.Default()
 
-	// Add middleware
-	router.Use(gin.Logger())
+	// Add middleware conditionally
+	// Only add logger middleware if LOG_HTTP is set to true
+	if os.Getenv("LOG_HTTP") == "true" {
+		router.Use(gin.Logger())
+	}
 	router.Use(gin.Recovery())
 	router.Use(CORSMiddleware())
 
