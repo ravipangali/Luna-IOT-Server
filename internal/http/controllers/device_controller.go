@@ -70,7 +70,7 @@ func (dc *DeviceController) GetDevice(c *gin.Context) {
 // GetDeviceByIMEI returns a device by IMEI
 func (dc *DeviceController) GetDeviceByIMEI(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})

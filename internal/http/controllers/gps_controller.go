@@ -65,7 +65,7 @@ func (gc *GPSController) GetGPSData(c *gin.Context) {
 // GetGPSDataByIMEI returns GPS data for a specific device
 func (gc *GPSController) GetGPSDataByIMEI(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})
@@ -136,7 +136,7 @@ func (gc *GPSController) GetLatestGPSData(c *gin.Context) {
 // GetLatestGPSDataByIMEI returns the latest GPS data for a specific device
 func (gc *GPSController) GetLatestGPSDataByIMEI(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})
@@ -164,7 +164,7 @@ func (gc *GPSController) GetLatestGPSDataByIMEI(c *gin.Context) {
 // GetGPSRoute returns GPS route data for tracking
 func (gc *GPSController) GetGPSRoute(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})

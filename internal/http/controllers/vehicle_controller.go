@@ -38,7 +38,7 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 // GetVehicle returns a single vehicle by IMEI
 func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})
@@ -141,7 +141,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 // UpdateVehicle updates an existing vehicle
 func (vc *VehicleController) UpdateVehicle(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})
@@ -187,7 +187,7 @@ func (vc *VehicleController) UpdateVehicle(c *gin.Context) {
 // DeleteVehicle deletes a vehicle
 func (vc *VehicleController) DeleteVehicle(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 15 {
+	if len(imei) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid IMEI format",
 		})
