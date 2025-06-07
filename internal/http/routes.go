@@ -8,11 +8,24 @@ import (
 
 // SetupRoutes configures all API routes
 func SetupRoutes(router *gin.Engine) {
+	SetupRoutesWithControlController(router, nil)
+}
+
+// SetupRoutesWithControlController configures all API routes with a shared control controller
+func SetupRoutesWithControlController(router *gin.Engine, sharedControlController *controllers.ControlController) {
 	// Initialize controllers
 	userController := controllers.NewUserController()
 	deviceController := controllers.NewDeviceController()
 	vehicleController := controllers.NewVehicleController()
 	gpsController := controllers.NewGPSController()
+
+	// Use shared control controller if provided, otherwise create new one
+	var controlController *controllers.ControlController
+	if sharedControlController != nil {
+		controlController = sharedControlController
+	} else {
+		controlController = controllers.NewControlController()
+	}
 
 	// API version 1
 	v1 := router.Group("/api/v1")
@@ -59,6 +72,19 @@ func SetupRoutes(router *gin.Engine) {
 			gps.GET("/:imei/latest", gpsController.GetLatestGPSDataByIMEI)
 			gps.GET("/:imei/route", gpsController.GetGPSRoute)
 			gps.DELETE("/:id", gpsController.DeleteGPSData)
+		}
+
+		// Control routes for oil and electricity
+		control := v1.Group("/control")
+		{
+			control.POST("/cut-oil", controlController.CutOilAndElectricity)
+			control.POST("/connect-oil", controlController.ConnectOilAndElectricity)
+			control.POST("/get-location", controlController.GetLocation)
+			control.GET("/active-devices", controlController.GetActiveDevices)
+			control.POST("/quick-cut/:id", controlController.QuickCutOil)
+			control.POST("/quick-connect/:id", controlController.QuickConnectOil)
+			control.POST("/quick-cut-imei/:imei", controlController.QuickCutOil)
+			control.POST("/quick-connect-imei/:imei", controlController.QuickConnectOil)
 		}
 	}
 

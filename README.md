@@ -4,12 +4,17 @@ A comprehensive GPS tracking server built with Go, supporting GT06 protocol devi
 
 ## Features
 
+- **Unified Server Architecture**: Single command runs both TCP and HTTP servers together
 - **GT06 Protocol Support**: Complete implementation of GT06 GPS tracking protocol
 - **PostgreSQL Database**: Robust data storage with GORM ORM
 - **RESTful API**: Full CRUD operations for users, devices, and vehicles
 - **MVC Architecture**: Clean separation of concerns with Models, Views, and Controllers
-- **Real-time GPS Tracking**: TCP server for live GPS data reception
-- **HTTP API Server**: RESTful endpoints for data management
+- **Real-time GPS Tracking**: TCP server for live GPS data reception from IoT devices
+- **HTTP API Server**: RESTful endpoints for data management and control
+- **Oil & Electricity Control**: Remote vehicle control via GPS devices (cut/connect fuel and electrical systems)
+- **Real-time Device Control**: Send commands to connected GPS devices for immediate response
+- **Concurrent Processing**: Both servers run simultaneously with shared device connections
+- **Graceful Shutdown**: Proper cleanup when stopping the server
 
 ## Database Schema
 
@@ -83,17 +88,37 @@ go mod tidy
 go run cmd/http-server/main.go
 ```
 
-### Running the Servers
+### Running the Unified Server
 
-#### HTTP API Server
-```bash
-go run cmd/http-server/main.go
+The Luna IoT Server now runs both TCP and HTTP servers together in a single command:
+
+#### Using the Run Scripts (Recommended)
+
+**Windows:**
+```batch
+run_server.bat
 ```
 
-#### TCP GPS Server
+**Linux/Mac:**
 ```bash
-go run cmd/tcp-server/main.go
+./run_server.sh
 ```
+
+#### Manual Build and Run
+```bash
+# Build
+go build -o luna_server main.go
+
+# Run (both TCP and HTTP servers start together)
+./luna_server
+```
+
+**What happens when you start the server:**
+- 📡 TCP Server starts on port 5000 (for IoT device connections)
+- 🌐 HTTP Server starts on port 8080 (for API access)
+- 💾 Database connection is established
+- ⚡ Device control system is enabled
+- 🔄 Both servers run simultaneously and share data
 
 ## API Endpoints
 
@@ -133,6 +158,16 @@ go run cmd/tcp-server/main.go
 - `GET /gps/:imei/latest` - Get latest GPS data for specific device
 - `GET /gps/:imei/route` - Get GPS route between two timestamps
 - `DELETE /gps/:id` - Delete GPS data (admin only)
+
+### Oil & Electricity Control
+- `POST /control/cut-oil` - Cut oil and electricity for a device
+- `POST /control/connect-oil` - Connect oil and electricity for a device
+- `POST /control/get-location` - Get current location from device
+- `GET /control/active-devices` - Get list of currently connected devices
+- `POST /control/quick-cut/:id` - Quick cut oil by device ID
+- `POST /control/quick-connect/:id` - Quick connect oil by device ID
+- `POST /control/quick-cut-imei/:imei` - Quick cut oil by IMEI
+- `POST /control/quick-connect-imei/:imei` - Quick connect oil by IMEI
 
 ## API Examples
 
@@ -186,6 +221,25 @@ curl http://localhost:8080/api/v1/gps/latest
 curl "http://localhost:8080/api/v1/gps/123456789012345/route?from=2024-01-01T00:00:00Z&to=2024-01-01T23:59:59Z"
 ```
 
+### Cut Oil and Electricity
+```bash
+curl -X POST http://localhost:8080/api/v1/control/cut-oil \
+  -H "Content-Type: application/json" \
+  -d '{"imei": "123456789012345"}'
+```
+
+### Connect Oil and Electricity
+```bash
+curl -X POST http://localhost:8080/api/v1/control/connect-oil \
+  -H "Content-Type: application/json" \
+  -d '{"imei": "123456789012345"}'
+```
+
+### Get Active Devices
+```bash
+curl http://localhost:8080/api/v1/control/active-devices
+```
+
 ## Project Structure
 
 ```
@@ -200,16 +254,28 @@ luna_iot_server/
 │   │   └── connection.go     # Database connection
 │   ├── http/
 │   │   ├── controllers/      # HTTP controllers
+│   │   │   ├── control_controller.go  # Oil & electricity control
+│   │   │   ├── device_controller.go
+│   │   │   ├── gps_controller.go
+│   │   │   ├── user_controller.go
+│   │   │   └── vehicle_controller.go
 │   │   ├── routes.go        # Route definitions
 │   │   └── server.go        # HTTP server setup
 │   ├── models/              # Database models
 │   │   ├── device.go
+│   │   ├── gps_data.go
 │   │   ├── user.go
 │   │   └── vehicle.go
 │   ├── protocol/            # GT06 protocol implementation
+│   │   ├── gt06_decoder.go  # Protocol decoder
+│   │   └── gps_tracker_control.go  # Device control commands
 │   ├── tracker/             # GPS tracking logic
 │   └── websocket/           # WebSocket support
+├── examples/                # Example code and tests
+│   └── oil_control_test.go  # Oil & electricity control test
 ├── pkg/                     # Public packages
+├── OIL_ELECTRICITY_CONTROL.md  # Detailed control system documentation
+├── test_oil_control.sh      # Bash script for testing control endpoints
 ├── go.mod
 └── go.sum
 ```
@@ -247,7 +313,31 @@ go run cmd/tcp-server/main.go
 
 # Test API endpoints
 curl http://localhost:8080/health
+
+# Test oil & electricity control
+./test_oil_control.sh
+
+# Run Go test for control functionality
+go run examples/oil_control_test.go
 ```
+
+## Oil & Electricity Control
+
+The server now supports remote vehicle control through GPS devices. For detailed information about the control system, see [OIL_ELECTRICITY_CONTROL.md](OIL_ELECTRICITY_CONTROL.md).
+
+### Quick Start for Control Features
+
+1. Ensure both servers are running (HTTP and TCP)
+2. Register a device in the database
+3. Connect the GPS device to the TCP server
+4. Use the control API endpoints to send commands
+
+### Safety Features
+
+- **Speed Limitation**: Oil cutting is disabled when vehicle speed > 20 km/h
+- **GPS Requirement**: Commands require active GPS tracking
+- **Device Validation**: Only registered devices can receive commands
+- **Real-time Communication**: Commands are sent immediately over active TCP connections
 
 ## License
 

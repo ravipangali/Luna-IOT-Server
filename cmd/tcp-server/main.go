@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"luna_iot_server/internal/db"
+	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
 	"net"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/joho/godotenv"
 )
+
+// Global control controller instance to track active connections
+var controlController *controllers.ControlController
 
 // isDeviceRegistered checks if a device with given IMEI exists in the database
 func isDeviceRegistered(imei string) bool {
@@ -138,7 +142,13 @@ func saveGPSData(packet *protocol.DecodedPacket) error {
 }
 
 func handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		conn.Close()
+		// Unregister connection when it closes
+		if deviceIMEI != "" {
+			controlController.UnregisterConnection(deviceIMEI)
+		}
+	}()
 
 	fmt.Printf("Client connected: %s\n", conn.RemoteAddr())
 
@@ -208,6 +218,9 @@ func handleConnection(conn net.Conn) {
 						// Device is registered, allow connection
 						deviceIMEI = potentialIMEI
 						fmt.Printf("✅ Authorized device login: %s\n", deviceIMEI)
+
+						// Register connection for control operations
+						controlController.RegisterConnection(deviceIMEI, conn)
 					}
 
 				case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
@@ -362,6 +375,9 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize global control controller
+	controlController = controllers.NewControlController()
+
 	// Get TCP port from environment variable or use default
 	port := os.Getenv("TCP_PORT")
 	if port == "" {
@@ -378,6 +394,7 @@ func main() {
 	fmt.Printf("GT06 TCP Server is running on port %s\n", port)
 	fmt.Println("Waiting for GT06 device connections...")
 	fmt.Println("Database connectivity enabled - GPS data will be saved")
+	fmt.Println("Control system enabled - Oil/Electricity control available via HTTP API")
 
 	for {
 		conn, err := listener.Accept()
