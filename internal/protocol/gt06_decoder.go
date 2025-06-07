@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"luna_iot_server/pkg/colors"
 	"strings"
 	"time"
 )
@@ -178,7 +178,7 @@ func (d *GT06Decoder) processBuffer() ([]*DecodedPacket, error) {
 		if packet[totalLength-2] == 0x0D && packet[totalLength-1] == 0x0A {
 			decoded, err := d.decodePacket(packet)
 			if err != nil {
-				log.Printf("Error decoding packet: %v", err)
+				colors.PrintError("Error decoding packet: %v", err)
 			} else if decoded != nil {
 				packets = append(packets, decoded)
 			}
@@ -239,7 +239,7 @@ func (d *GT06Decoder) decodePacket(packet []byte) (*DecodedPacket, error) {
 		dataPayload = packet[dataStartOffset:serialOffset]
 	}
 
-	log.Printf("Data Payload: %v", dataPayload)
+	colors.PrintDebug("GT06 Data Payload: %v", dataPayload)
 
 	switch packet[protocolOffset] {
 	case 0x01:
@@ -493,7 +493,7 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 // decodeStatusInfo decodes status information
 func (d *GT06Decoder) decodeStatusInfo(data []byte, result *DecodedPacket) {
 	if len(data) < 3 {
-		log.Printf("Status info data too short")
+		colors.PrintWarning("Status info data too short")
 		return
 	}
 

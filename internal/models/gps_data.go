@@ -10,7 +10,7 @@ import (
 // GPSData represents GPS tracking data from devices
 type GPSData struct {
 	ID        uint      `json:"id" gorm:"primarykey"`
-	IMEI      string    `json:"imei" gorm:"size:15;not null;index" validate:"required,len=15"`
+	IMEI      string    `json:"imei" gorm:"size:16;not null;index" validate:"required,len=16"`
 	Timestamp time.Time `json:"timestamp" gorm:"not null;index"`
 
 	// GPS Location Data

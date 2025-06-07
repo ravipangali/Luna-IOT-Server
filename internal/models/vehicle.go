@@ -19,7 +19,7 @@ const (
 
 // Vehicle represents a vehicle in the tracking system
 type Vehicle struct {
-	IMEI        string         `json:"imei" gorm:"primaryKey;size:15;not null" validate:"required,len=15"`
+	IMEI        string         `json:"imei" gorm:"primaryKey;size:16;not null" validate:"required,len=16"`
 	RegNo       string         `json:"reg_no" gorm:"size:20;uniqueIndex;not null" validate:"required"`
 	Name        string         `json:"name" gorm:"size:100;not null" validate:"required"`
 	Odometer    float64        `json:"odometer" gorm:"type:decimal(10,2);default:0"`

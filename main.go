@@ -11,19 +11,27 @@ import (
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
 	"luna_iot_server/internal/tcp"
+	"luna_iot_server/pkg/colors"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Print attractive banner
+	colors.PrintBanner()
+
 	// Load environment variables from .env file
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using system environment variables")
+		colors.PrintWarning("No .env file found, using system environment variables")
+	} else {
+		colors.PrintSuccess("Environment configuration loaded from .env file")
 	}
 
 	// Initialize database connection
+	colors.PrintInfo("Initializing database connection...")
 	if err := db.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+		colors.PrintError("Failed to initialize database: %v", err)
+		log.Fatalf("Database initialization failed: %v", err)
 	}
 	defer db.Close()
 
@@ -38,11 +46,12 @@ func main() {
 		httpPort = "8080"
 	}
 
-	fmt.Println("🚀 Luna IoT Server Starting...")
-	fmt.Printf("📡 TCP Server will listen on port %s (for IoT devices)\n", tcpPort)
-	fmt.Printf("🌐 HTTP Server will listen on port %s (for API access)\n", httpPort)
-	fmt.Println("💾 Database connection established")
-	fmt.Println("⚡ Control system enabled - Oil/Electricity control available")
+	// Print server startup information
+	colors.PrintHeader("LUNA IOT SERVER INITIALIZATION")
+	colors.PrintServer("📡", "TCP Server configured for port %s (IoT Device Connections)", tcpPort)
+	colors.PrintServer("🌐", "HTTP Server configured for port %s (REST API Access)", httpPort)
+	colors.PrintSuccess("Database connection established successfully")
+	colors.PrintControl("Oil & Electricity control system enabled")
 
 	// Create a wait group to manage both servers
 	var wg sync.WaitGroup
@@ -53,7 +62,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 		tcpServer := tcp.NewServer(tcpPort)
-		log.Printf("Starting TCP Server on port %s", tcpPort)
+		colors.PrintInfo("Starting TCP Server for IoT device connections...")
 		if err := tcpServer.Start(); err != nil {
 			errorChan <- fmt.Errorf("TCP server error: %v", err)
 		}
@@ -64,17 +73,22 @@ func main() {
 	go func() {
 		defer wg.Done()
 		httpServer := http.NewServer(httpPort)
-		log.Printf("Starting HTTP Server on port %s", httpPort)
-		log.Println("Available HTTP endpoints:")
-		log.Println("  GET    /health")
-		log.Println("  GET    /api/v1/users")
-		log.Println("  POST   /api/v1/users")
-		log.Println("  GET    /api/v1/devices")
-		log.Println("  POST   /api/v1/devices")
-		log.Println("  GET    /api/v1/vehicles")
-		log.Println("  POST   /api/v1/vehicles")
-		log.Println("  POST   /api/v1/control/oil")
-		log.Println("  POST   /api/v1/control/electricity")
+		colors.PrintInfo("Starting HTTP Server for REST API...")
+
+		colors.PrintSubHeader("Available REST API Endpoints")
+		colors.PrintEndpoint("GET", "/health", "Health check endpoint")
+		colors.PrintEndpoint("GET", "/api/v1/users", "List all users")
+		colors.PrintEndpoint("POST", "/api/v1/users", "Create new user")
+		colors.PrintEndpoint("GET", "/api/v1/devices", "List all devices")
+		colors.PrintEndpoint("POST", "/api/v1/devices", "Register new device")
+		colors.PrintEndpoint("GET", "/api/v1/vehicles", "List all vehicles")
+		colors.PrintEndpoint("POST", "/api/v1/vehicles", "Register new vehicle")
+		colors.PrintEndpoint("GET", "/api/v1/gps", "Get GPS tracking data")
+		colors.PrintEndpoint("POST", "/api/v1/control/cut-oil", "Cut oil & electricity")
+		colors.PrintEndpoint("POST", "/api/v1/control/connect-oil", "Connect oil & electricity")
+		colors.PrintEndpoint("POST", "/api/v1/control/get-location", "Get device location")
+		colors.PrintEndpoint("GET", "/api/v1/control/active-devices", "List active devices")
+
 		if err := httpServer.Start(); err != nil {
 			errorChan <- fmt.Errorf("HTTP server error: %v", err)
 		}
@@ -87,11 +101,10 @@ func main() {
 	// Wait for either an error or shutdown signal
 	select {
 	case err := <-errorChan:
-		log.Printf("Server error: %v", err)
+		colors.PrintError("Server startup failed: %v", err)
 		return
 	case <-quit:
-		fmt.Println("\n🛑 Shutting down Luna IoT Server...")
-		log.Println("Graceful shutdown initiated...")
+		colors.PrintShutdown()
 		return
 	}
 }

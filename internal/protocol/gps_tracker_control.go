@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
+	"luna_iot_server/pkg/colors"
 	"net"
 	"strings"
 	"time"
@@ -147,8 +147,8 @@ func (g *GPSTrackerController) sendCommand(command string) (*ControlResponse, er
 	packet := g.buildControlPacket(command)
 	data := g.packetToBytes(packet)
 
-	log.Printf("Sending command %s to device %s", command, g.deviceIMEI)
-	log.Printf("Packet bytes: %x", data)
+	colors.PrintControl("Sending command %s to device %s", command, g.deviceIMEI)
+	colors.PrintDebug("Command packet bytes: %x", data)
 
 	_, err := g.conn.Write(data)
 	if err != nil {
@@ -247,7 +247,7 @@ func (g *GPSTrackerController) getResponseMessage(command, response string) stri
 
 // CutOilAndElectricity sends command to cut oil and electricity
 func (g *GPSTrackerController) CutOilAndElectricity() (*ControlResponse, error) {
-	log.Printf("=== CUTTING OIL AND ELECTRICITY for device %s ===", g.deviceIMEI)
+	colors.PrintSubHeader("CUTTING OIL AND ELECTRICITY for device %s", g.deviceIMEI)
 
 	response, err := g.sendCommand(CmdCutOil)
 	if err != nil {
@@ -255,9 +255,9 @@ func (g *GPSTrackerController) CutOilAndElectricity() (*ControlResponse, error) 
 	}
 
 	if response.Success {
-		log.Printf("✅ Oil and electricity successfully cut for device %s", g.deviceIMEI)
+		colors.PrintSuccess("Oil and electricity successfully cut for device %s", g.deviceIMEI)
 	} else {
-		log.Printf("❌ Failed to cut oil and electricity for device %s: %s", g.deviceIMEI, response.Message)
+		colors.PrintError("Failed to cut oil and electricity for device %s: %s", g.deviceIMEI, response.Message)
 	}
 
 	return response, nil
@@ -265,7 +265,7 @@ func (g *GPSTrackerController) CutOilAndElectricity() (*ControlResponse, error) 
 
 // ConnectOilAndElectricity sends command to connect oil and electricity
 func (g *GPSTrackerController) ConnectOilAndElectricity() (*ControlResponse, error) {
-	log.Printf("=== CONNECTING OIL AND ELECTRICITY for device %s ===", g.deviceIMEI)
+	colors.PrintSubHeader("CONNECTING OIL AND ELECTRICITY for device %s", g.deviceIMEI)
 
 	response, err := g.sendCommand(CmdConnectOil)
 	if err != nil {
@@ -273,9 +273,9 @@ func (g *GPSTrackerController) ConnectOilAndElectricity() (*ControlResponse, err
 	}
 
 	if response.Success {
-		log.Printf("✅ Oil and electricity successfully connected for device %s", g.deviceIMEI)
+		colors.PrintSuccess("Oil and electricity successfully connected for device %s", g.deviceIMEI)
 	} else {
-		log.Printf("❌ Failed to connect oil and electricity for device %s: %s", g.deviceIMEI, response.Message)
+		colors.PrintError("Failed to connect oil and electricity for device %s: %s", g.deviceIMEI, response.Message)
 	}
 
 	return response, nil
@@ -283,14 +283,14 @@ func (g *GPSTrackerController) ConnectOilAndElectricity() (*ControlResponse, err
 
 // GetLocation sends command to get current location
 func (g *GPSTrackerController) GetLocation() (*ControlResponse, error) {
-	log.Printf("=== GETTING LOCATION for device %s ===", g.deviceIMEI)
+	colors.PrintSubHeader("GETTING LOCATION for device %s", g.deviceIMEI)
 
 	response, err := g.sendCommand(CmdLocation)
 	if err != nil {
 		return response, fmt.Errorf("failed to get location: %v", err)
 	}
 
-	log.Printf("Location response for device %s: %s", g.deviceIMEI, response.Response)
+	colors.PrintData("📍", "Location response for device %s: %s", g.deviceIMEI, response.Response)
 	return response, nil
 }
 

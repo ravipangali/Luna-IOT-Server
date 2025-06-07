@@ -2,9 +2,9 @@ package db
 
 import (
 	"fmt"
-	"log"
 	"luna_iot_server/config"
 	"luna_iot_server/internal/models"
+	"luna_iot_server/pkg/colors"
 	"strings"
 
 	"gorm.io/driver/postgres"
@@ -18,8 +18,7 @@ var DB *gorm.DB
 func Initialize() error {
 	dbConfig := config.GetDatabaseConfig()
 	dsn := dbConfig.GetDSN()
-	fmt.Println("DSN:", dsn)
-	// dsn := "host=84.247.131.246 port=5433 user=luna role=luna password=Luna@#$321 dbname=luna_iot sslmode=disable"
+	colors.PrintDebug("Database DSN: %s", dsn)
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -30,7 +29,7 @@ func Initialize() error {
 		return fmt.Errorf("failed to connect to database: %v", err)
 	}
 
-	log.Println("Database connection established successfully")
+	colors.PrintSuccess("Database connection established successfully")
 
 	// Run auto-migrations
 	if err := RunMigrations(); err != nil {
@@ -42,7 +41,7 @@ func Initialize() error {
 
 // RunMigrations runs all database migrations
 func RunMigrations() error {
-	log.Println("Running database migrations...")
+	colors.PrintSubHeader("Running Database Migrations")
 
 	// Check if we need to reset tables (only if there are constraint conflicts)
 	shouldReset := false
@@ -54,63 +53,63 @@ func RunMigrations() error {
 		err := DB.Model(&models.Vehicle{}).Count(&count).Error
 		if err != nil && (strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "constraint")) {
 			shouldReset = true
-			log.Println("Detected constraint issues, will reset tables...")
+			colors.PrintWarning("Detected constraint issues, will reset tables...")
 		}
 	}
 
 	if shouldReset {
 		// Drop tables in reverse order to handle foreign key constraints
 		if DB.Migrator().HasTable(&models.GPSData{}) {
-			log.Println("Dropping existing gps_data table...")
+			colors.PrintInfo("Dropping existing gps_data table...")
 			DB.Migrator().DropTable(&models.GPSData{})
 		}
 
 		if DB.Migrator().HasTable(&models.Vehicle{}) {
-			log.Println("Dropping existing vehicles table...")
+			colors.PrintInfo("Dropping existing vehicles table...")
 			DB.Migrator().DropTable(&models.Vehicle{})
 		}
 
 		if DB.Migrator().HasTable(&models.Device{}) {
-			log.Println("Dropping existing devices table...")
+			colors.PrintInfo("Dropping existing devices table...")
 			DB.Migrator().DropTable(&models.Device{})
 		}
 
 		if DB.Migrator().HasTable(&models.User{}) {
-			log.Println("Dropping existing users table...")
+			colors.PrintInfo("Dropping existing users table...")
 			DB.Migrator().DropTable(&models.User{})
 		}
 	}
 
 	// Create tables in the correct order
-	log.Println("Creating/updating tables...")
+	colors.PrintInfo("Creating/updating database tables...")
 
 	// Create base tables first (no foreign keys)
 	err := DB.AutoMigrate(&models.User{})
 	if err != nil {
 		return fmt.Errorf("user table migration failed: %v", err)
 	}
-	log.Println("✓ Users table ready")
+	colors.PrintSuccess("✓ Users table ready")
 
 	err = DB.AutoMigrate(&models.Device{})
 	if err != nil {
 		return fmt.Errorf("device table migration failed: %v", err)
 	}
-	log.Println("✓ Devices table ready")
+	colors.PrintSuccess("✓ Devices table ready")
 
 	// Create tables with foreign keys
 	err = DB.AutoMigrate(&models.Vehicle{})
 	if err != nil {
 		return fmt.Errorf("vehicle table migration failed: %v", err)
 	}
-	log.Println("✓ Vehicles table ready")
+	colors.PrintSuccess("✓ Vehicles table ready")
 
 	err = DB.AutoMigrate(&models.GPSData{})
 	if err != nil {
 		return fmt.Errorf("gps_data table migration failed: %v", err)
 	}
-	log.Println("✓ GPS data table ready")
+	colors.PrintSuccess("✓ GPS data table ready")
 
-	log.Println("Database migrations completed successfully")
+	colors.PrintHeader("DATABASE MIGRATIONS COMPLETED SUCCESSFULLY")
 	return nil
 }
 

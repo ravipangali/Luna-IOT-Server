@@ -2,10 +2,10 @@ package controllers
 
 import (
 	"fmt"
-	"log"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
+	"luna_iot_server/pkg/colors"
 	"net"
 	"net/http"
 	"strconv"
@@ -29,13 +29,13 @@ func NewControlController() *ControlController {
 // RegisterConnection registers an active TCP connection for a device
 func (cc *ControlController) RegisterConnection(imei string, conn net.Conn) {
 	cc.activeConnections[imei] = conn
-	log.Printf("Registered connection for device %s", imei)
+	colors.PrintConnection("🔗", "Registered connection for device %s", imei)
 }
 
 // UnregisterConnection removes a TCP connection for a device
 func (cc *ControlController) UnregisterConnection(imei string) {
 	delete(cc.activeConnections, imei)
-	log.Printf("Unregistered connection for device %s", imei)
+	colors.PrintConnection("🔌", "Unregistered connection for device %s", imei)
 }
 
 // GetActiveConnection retrieves the active TCP connection for a device
@@ -144,7 +144,7 @@ func (cc *ControlController) CutOilAndElectricity(c *gin.Context) {
 	}
 
 	// Save control action to database (optional - you can create a control_logs table)
-	log.Printf("Oil cut command sent to device %s - Success: %v, Message: %s",
+	colors.PrintControl("Oil cut command sent to device %s - Success: %v, Message: %s",
 		device.IMEI, controlResponse.Success, controlResponse.Message)
 
 	c.JSON(http.StatusOK, ControlResponse{
@@ -202,7 +202,7 @@ func (cc *ControlController) ConnectOilAndElectricity(c *gin.Context) {
 	}
 
 	// Save control action to database (optional)
-	log.Printf("Oil connect command sent to device %s - Success: %v, Message: %s",
+	colors.PrintControl("Oil connect command sent to device %s - Success: %v, Message: %s",
 		device.IMEI, controlResponse.Success, controlResponse.Message)
 
 	c.JSON(http.StatusOK, ControlResponse{
@@ -260,7 +260,7 @@ func (cc *ControlController) GetLocation(c *gin.Context) {
 	}
 
 	// Save control action to database (optional)
-	log.Printf("Location request sent to device %s - Success: %v, Response: %s",
+	colors.PrintControl("Location request sent to device %s - Success: %v, Response: %s",
 		device.IMEI, controlResponse.Success, controlResponse.Response)
 
 	c.JSON(http.StatusOK, ControlResponse{

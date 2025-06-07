@@ -1,7 +1,7 @@
 package http
 
 import (
-	"log"
+	"luna_iot_server/pkg/colors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,7 +33,7 @@ func NewServer(port string) *Server {
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	log.Printf("Starting HTTP server on port %s", s.port)
+	colors.PrintServer("🌐", "HTTP REST API Server starting on port %s", s.port)
 	return s.router.Run(":" + s.port)
 }
 

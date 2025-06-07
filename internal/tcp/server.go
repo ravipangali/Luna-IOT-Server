@@ -3,11 +3,11 @@ package tcp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
+	"luna_iot_server/pkg/colors"
 	"net"
 )
 
@@ -36,15 +36,15 @@ func (s *Server) Start() error {
 	s.listener = listener
 	defer listener.Close()
 
-	fmt.Printf("📡 GT06 TCP Server is running on port %s\n", s.port)
-	fmt.Println("📶 Waiting for IoT device connections...")
-	fmt.Println("💾 Database connectivity enabled - GPS data will be saved")
-	fmt.Println("🎛️  Control system enabled - Oil/Electricity control available")
+	colors.PrintServer("📡", "GT06 TCP Server is running on port %s", s.port)
+	colors.PrintConnection("📶", "Waiting for IoT device connections...")
+	colors.PrintData("💾", "Database connectivity enabled - GPS data will be saved")
+	colors.PrintControl("Oil/Electricity control system enabled - Ready for commands")
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Error accepting TCP connection: %v", err)
+			colors.PrintError("Error accepting TCP connection: %v", err)
 			continue
 		}
 
@@ -73,7 +73,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	fmt.Printf("📱 IoT Device connected: %s\n", conn.RemoteAddr())
+	colors.PrintConnection("📱", "IoT Device connected from %s", conn.RemoteAddr())
 
 	// Create a new GT06 decoder instance for this connection
 	decoder := protocol.NewGT06Decoder()
@@ -84,35 +84,35 @@ func (s *Server) handleConnection(conn net.Conn) {
 		n, err := conn.Read(buffer)
 		if err != nil {
 			if err.Error() == "EOF" {
-				fmt.Printf("📱 IoT Device disconnected: %s\n", conn.RemoteAddr())
+				colors.PrintConnection("📱", "IoT Device disconnected: %s", conn.RemoteAddr())
 				break
 			}
-			log.Printf("Error reading from connection %s: %v", conn.RemoteAddr(), err)
+			colors.PrintError("Error reading from connection %s: %v", conn.RemoteAddr(), err)
 			break
 		}
 
 		if n > 0 {
 			// Log raw data received
-			fmt.Printf("📦 Raw data from %s: %X\n", conn.RemoteAddr(), buffer[:n])
+			colors.PrintData("📦", "Raw data from %s: %X", conn.RemoteAddr(), buffer[:n])
 
 			// Process data through GT06 decoder
 			packets, err := decoder.AddData(buffer[:n])
 			if err != nil {
-				log.Printf("❌ Error decoding data from %s: %v", conn.RemoteAddr(), err)
+				colors.PrintError("Error decoding data from %s: %v", conn.RemoteAddr(), err)
 				continue
 			}
 
 			// Process each decoded packet
 			for _, packet := range packets {
-				fmt.Printf("📋 Decoded packet from %s:\n", conn.RemoteAddr())
+				colors.PrintData("📋", "Decoded packet from %s:", conn.RemoteAddr())
 
 				// Convert packet to JSON for pretty printing
 				jsonData, err := json.MarshalIndent(packet, "", "  ")
 				if err != nil {
-					log.Printf("Error marshaling packet to JSON: %v", err)
-					fmt.Printf("Packet: %+v\n", packet)
+					colors.PrintError("Error marshaling packet to JSON: %v", err)
+					colors.PrintDebug("Packet: %+v", packet)
 				} else {
-					fmt.Printf("%s\n", jsonData)
+					colors.PrintDebug("Packet Data:\n%s", jsonData)
 				}
 
 				// Handle different packet types
@@ -141,8 +141,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 // handleLoginPacket processes LOGIN packets from IoT devices
 func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn) string {
-	fmt.Printf("🔐 Device login from %s - Terminal ID: %s\n",
-		conn.RemoteAddr(), packet.TerminalID)
+	colors.PrintConnection("🔐", "Device login from %s - Terminal ID: %s", conn.RemoteAddr(), packet.TerminalID)
 
 	// Convert hex terminal ID to IMEI and validate device exists
 	if len(packet.TerminalID) >= 15 {
@@ -150,16 +149,15 @@ func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn
 
 		// Check if device exists in database
 		if !s.isDeviceRegistered(potentialIMEI) {
-			log.Printf("🚫 Unauthorized device attempted login from %s - IMEI: %s (not registered)",
-				conn.RemoteAddr(), potentialIMEI)
-			fmt.Printf("⚠️  Rejecting unregistered device: %s\n", potentialIMEI)
+			colors.PrintError("Unauthorized device attempted login from %s - IMEI: %s (not registered)", conn.RemoteAddr(), potentialIMEI)
+			colors.PrintWarning("Rejecting unregistered device: %s", potentialIMEI)
 			// Close connection for unregistered devices
 			conn.Close()
 			return ""
 		}
 
 		// Device is registered, allow connection
-		fmt.Printf("✅ Authorized device login: %s\n", potentialIMEI)
+		colors.PrintSuccess("Authorized device login: %s", potentialIMEI)
 
 		// Register connection for control operations
 		s.controlController.RegisterConnection(potentialIMEI, conn)
@@ -171,7 +169,7 @@ func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn
 // handleGPSPacket processes GPS data packets
 func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	if packet.Latitude != nil && packet.Longitude != nil {
-		fmt.Printf("📍 GPS Location from %s: Lat=%.6f, Lng=%.6f, Speed=%v\n",
+		colors.PrintData("📍", "GPS Location from %s: Lat=%.6f, Lng=%.6f, Speed=%v km/h",
 			conn.RemoteAddr(), *packet.Latitude, *packet.Longitude, packet.Speed)
 	}
 
@@ -179,7 +177,7 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	if deviceIMEI != "" {
 		// Verify device still exists before saving GPS data
 		if !s.isDeviceRegistered(deviceIMEI) {
-			log.Printf("🚫 IMEI %s is not registered on our system", deviceIMEI)
+			colors.PrintWarning("IMEI %s is not registered on our system", deviceIMEI)
 			return
 		}
 
@@ -187,23 +185,23 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 
 		// Save to database
 		if err := db.GetDB().Create(&gpsData).Error; err != nil {
-			log.Printf("❌ Error saving GPS data: %v", err)
+			colors.PrintError("Error saving GPS data: %v", err)
 		} else {
-			fmt.Printf("💾 GPS data saved for device %s\n", deviceIMEI)
+			colors.PrintSuccess("GPS data saved for device %s", deviceIMEI)
 		}
 	}
 }
 
 // handleStatusPacket processes STATUS_INFO packets
 func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
-	fmt.Printf("📊 Status info from %s: Ignition=%s, Voltage=%v, GSM Signal=%v\n",
+	colors.PrintData("📊", "Status info from %s: Ignition=%s, Voltage=%v, GSM Signal=%v",
 		conn.RemoteAddr(), packet.Ignition, packet.Voltage, packet.GSMSignal)
 
 	// Save status data to database if we have device IMEI and device is still registered
 	if deviceIMEI != "" {
 		// Verify device still exists before saving status data
 		if !s.isDeviceRegistered(deviceIMEI) {
-			log.Printf("🚫 IMEI %s is not registered on our system", deviceIMEI)
+			colors.PrintWarning("IMEI %s is not registered on our system", deviceIMEI)
 			return
 		}
 
@@ -211,31 +209,30 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 
 		// Save to database
 		if err := db.GetDB().Create(&statusData).Error; err != nil {
-			log.Printf("❌ Error saving status data: %v", err)
+			colors.PrintError("Error saving status data: %v", err)
 		} else {
-			fmt.Printf("💾 Status data saved for device %s\n", deviceIMEI)
+			colors.PrintSuccess("Status data saved for device %s", deviceIMEI)
 		}
 	}
 }
 
 // handleAlarmPacket processes ALARM_DATA packets
 func (s *Server) handleAlarmPacket(packet *protocol.DecodedPacket, conn net.Conn) {
-	fmt.Printf("🚨 Alarm from %s: Type=%+v\n",
-		conn.RemoteAddr(), packet.AlarmType)
+	colors.PrintWarning("🚨 ALARM detected from %s: Type=%+v", conn.RemoteAddr(), packet.AlarmType)
 }
 
 // sendResponse sends response packets back to IoT devices
 func (s *Server) sendResponse(packet *protocol.DecodedPacket, conn net.Conn, decoder *protocol.GT06Decoder) {
 	imei := packet.TerminalID
-	fmt.Println("📤 IMEI:", imei)
+	colors.PrintData("📤", "Preparing response for IMEI: %s", imei)
 
 	response := decoder.GenerateResponse(uint16(packet.SerialNumber), packet.Protocol)
 
 	_, err := conn.Write(response)
 	if err != nil {
-		log.Printf("❌ Error sending response to %s: %v", conn.RemoteAddr(), err)
+		colors.PrintError("Error sending response to %s: %v", conn.RemoteAddr(), err)
 	} else {
-		fmt.Printf("✅ Sent response to %s: %X\n", conn.RemoteAddr(), response)
+		colors.PrintSuccess("Response sent to %s: %X", conn.RemoteAddr(), response)
 	}
 }
 
