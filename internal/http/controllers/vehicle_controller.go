@@ -89,9 +89,9 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	}
 
 	// Validate IMEI length
-	if len(vehicle.IMEI) != 15 {
+	if len(vehicle.IMEI) != 16 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "IMEI must be exactly 15 digits",
+			"error": "IMEI must be exactly 16 digits",
 		})
 		return
 	}

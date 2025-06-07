@@ -26,6 +26,14 @@ func NewServer(port string) *Server {
 	}
 }
 
+// NewServerWithController creates a new TCP server instance with a shared control controller
+func NewServerWithController(port string, sharedController *controllers.ControlController) *Server {
+	return &Server{
+		port:              port,
+		controlController: sharedController,
+	}
+}
+
 // Start starts the TCP server
 func (s *Server) Start() error {
 	listener, err := net.Listen("tcp", ":"+s.port)

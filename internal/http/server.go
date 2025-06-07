@@ -1,6 +1,7 @@
 package http
 
 import (
+	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/pkg/colors"
 	"os"
 
@@ -31,6 +32,31 @@ func NewServer(port string) *Server {
 
 	// Setup routes
 	SetupRoutes(router)
+
+	return &Server{
+		router: router,
+		port:   port,
+	}
+}
+
+// NewServerWithController creates a new HTTP server instance with a shared control controller
+func NewServerWithController(port string, sharedController *controllers.ControlController) *Server {
+	// Set Gin to release mode to reduce debug output
+	gin.SetMode(gin.ReleaseMode)
+
+	// Create Gin router
+	router := gin.Default()
+
+	// Add middleware conditionally
+	// Only add logger middleware if LOG_HTTP is set to true
+	if os.Getenv("LOG_HTTP") == "true" {
+		router.Use(gin.Logger())
+	}
+	router.Use(gin.Recovery())
+	router.Use(CORSMiddleware())
+
+	// Setup routes with shared control controller
+	SetupRoutesWithControlController(router, sharedController)
 
 	return &Server{
 		router: router,

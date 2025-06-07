@@ -10,6 +10,7 @@ import (
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
+	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/internal/tcp"
 	"luna_iot_server/pkg/colors"
 
@@ -46,6 +47,10 @@ func main() {
 		httpPort = "8080"
 	}
 
+	// Create a shared control controller instance that both servers will use
+	sharedControlController := controllers.NewControlController()
+	colors.PrintSuccess("Shared control controller initialized")
+
 	// Print server startup information
 	colors.PrintHeader("LUNA IOT SERVER INITIALIZATION")
 	colors.PrintServer("📡", "TCP Server configured for port %s (IoT Device Connections)", tcpPort)
@@ -61,7 +66,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		tcpServer := tcp.NewServer(tcpPort)
+		tcpServer := tcp.NewServerWithController(tcpPort, sharedControlController)
 		colors.PrintInfo("Starting TCP Server for IoT device connections...")
 		if err := tcpServer.Start(); err != nil {
 			errorChan <- fmt.Errorf("TCP server error: %v", err)
@@ -72,7 +77,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		httpServer := http.NewServer(httpPort)
+		httpServer := http.NewServerWithController(httpPort, sharedControlController)
 		colors.PrintInfo("Starting HTTP Server for REST API...")
 
 		colors.PrintSubHeader("Available REST API Endpoints")

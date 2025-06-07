@@ -30,6 +30,8 @@ func NewControlController() *ControlController {
 func (cc *ControlController) RegisterConnection(imei string, conn net.Conn) {
 	cc.activeConnections[imei] = conn
 	colors.PrintConnection("🔗", "Registered connection for device %s", imei)
+	colors.PrintDebug("Total active connections: %d", len(cc.activeConnections))
+	colors.PrintDebug("Active IMEIs: %v", cc.getRegisteredIMEIs())
 }
 
 // UnregisterConnection removes a TCP connection for a device
@@ -40,8 +42,24 @@ func (cc *ControlController) UnregisterConnection(imei string) {
 
 // GetActiveConnection retrieves the active TCP connection for a device
 func (cc *ControlController) GetActiveConnection(imei string) (net.Conn, bool) {
+	colors.PrintDebug("Looking for active connection for IMEI: %s", imei)
+	colors.PrintDebug("Currently registered IMEIs: %v", cc.getRegisteredIMEIs())
 	conn, exists := cc.activeConnections[imei]
+	if exists {
+		colors.PrintDebug("Found active connection for IMEI: %s", imei)
+	} else {
+		colors.PrintWarning("No active connection found for IMEI: %s", imei)
+	}
 	return conn, exists
+}
+
+// getRegisteredIMEIs returns a list of currently registered IMEIs for debugging
+func (cc *ControlController) getRegisteredIMEIs() []string {
+	var imeis []string
+	for imei := range cc.activeConnections {
+		imeis = append(imeis, imei)
+	}
+	return imeis
 }
 
 // ControlRequest represents the request body for control operations
