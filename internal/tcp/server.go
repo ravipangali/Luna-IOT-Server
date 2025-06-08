@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"luna_iot_server/internal/db"
+	"luna_iot_server/internal/http"
 	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
@@ -78,6 +79,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 		// Unregister connection when it closes
 		if deviceIMEI != "" {
 			s.controlController.UnregisterConnection(deviceIMEI)
+			// Broadcast device disconnection to WebSocket clients
+			if http.WSHub != nil {
+				http.WSHub.BroadcastDeviceStatus(deviceIMEI, "disconnected", "")
+			}
 		}
 	}()
 
@@ -127,13 +132,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				switch packet.ProtocolName {
 				case "LOGIN":
 					deviceIMEI = s.handleLoginPacket(packet, conn)
-
 				case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
 					s.handleGPSPacket(packet, conn, deviceIMEI)
-
 				case "STATUS_INFO":
 					s.handleStatusPacket(packet, conn, deviceIMEI)
-
 				case "ALARM_DATA":
 					s.handleAlarmPacket(packet, conn)
 				}
@@ -147,28 +149,33 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-// handleLoginPacket processes LOGIN packets from IoT devices
+// handleLoginPacket processes device login packets
 func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn) string {
-	colors.PrintConnection("🔐", "Device login from %s - Terminal ID: %s", conn.RemoteAddr(), packet.TerminalID)
-
-	// Convert hex terminal ID to IMEI and validate device exists
 	if len(packet.TerminalID) >= 16 {
 		potentialIMEI := packet.TerminalID[:16]
 
-		// Check if device exists in database
+		// Validate device registration
 		if !s.isDeviceRegistered(potentialIMEI) {
-			colors.PrintError("Unauthorized device attempted login from %s - IMEI: %s (not registered)", conn.RemoteAddr(), potentialIMEI)
-			colors.PrintWarning("Rejecting unregistered device: %s", potentialIMEI)
-			// Close connection for unregistered devices
+			colors.PrintError("Unauthorized device: %s", potentialIMEI)
 			conn.Close()
 			return ""
 		}
 
-		// Device is registered, allow connection
 		colors.PrintSuccess("Authorized device login: %s", potentialIMEI)
-
-		// Register connection for control operations
 		s.controlController.RegisterConnection(potentialIMEI, conn)
+
+		// Get vehicle info for WebSocket broadcast
+		var vehicle models.Vehicle
+		vehicleReg := ""
+		if err := db.GetDB().Where("imei = ?", potentialIMEI).First(&vehicle).Error; err == nil {
+			vehicleReg = vehicle.RegNo
+		}
+
+		// Broadcast device connection to WebSocket clients
+		if http.WSHub != nil {
+			http.WSHub.BroadcastDeviceStatus(potentialIMEI, "connected", vehicleReg)
+		}
+
 		return potentialIMEI
 	}
 	return ""
@@ -177,45 +184,43 @@ func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn
 // handleGPSPacket processes GPS data packets
 func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	if packet.Latitude != nil && packet.Longitude != nil {
-		colors.PrintData("📍", "GPS Location from %s: Lat=%.6f, Lng=%.6f, Speed=%v km/h",
-			conn.RemoteAddr(), *packet.Latitude, *packet.Longitude, packet.Speed)
+		colors.PrintData("📍", "GPS Location: Lat=%.6f, Lng=%.6f, Speed=%v km/h",
+			*packet.Latitude, *packet.Longitude, packet.Speed)
 	}
 
-	// Save GPS data to database if we have device IMEI and device is still registered
-	if deviceIMEI != "" {
-		// Verify device still exists before saving GPS data
-		if !s.isDeviceRegistered(deviceIMEI) {
-			colors.PrintWarning("IMEI %s is not registered on our system", deviceIMEI)
-			return
-		}
-
+	// Save GPS data and broadcast to WebSocket clients
+	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
 		gpsData := s.buildGPSData(packet, deviceIMEI)
-
-		// Save to database
 		if err := db.GetDB().Create(&gpsData).Error; err != nil {
 			colors.PrintError("Error saving GPS data: %v", err)
 		} else {
 			colors.PrintSuccess("GPS data saved for device %s", deviceIMEI)
+
+			// Get vehicle information for WebSocket broadcast
+			var vehicle models.Vehicle
+			vehicleName := ""
+			regNo := ""
+			if err := db.GetDB().Where("imei = ?", deviceIMEI).First(&vehicle).Error; err == nil {
+				vehicleName = vehicle.Name
+				regNo = vehicle.RegNo
+			}
+
+			// Broadcast GPS update to WebSocket clients
+			if http.WSHub != nil {
+				http.WSHub.BroadcastGPSUpdate(&gpsData, vehicleName, regNo)
+			}
 		}
 	}
 }
 
-// handleStatusPacket processes STATUS_INFO packets
+// handleStatusPacket processes device status packets
 func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	colors.PrintData("📊", "Status info from %s: Ignition=%s, Voltage=%v, GSM Signal=%v",
 		conn.RemoteAddr(), packet.Ignition, packet.Voltage, packet.GSMSignal)
 
-	// Save status data to database if we have device IMEI and device is still registered
-	if deviceIMEI != "" {
-		// Verify device still exists before saving status data
-		if !s.isDeviceRegistered(deviceIMEI) {
-			colors.PrintWarning("IMEI %s is not registered on our system", deviceIMEI)
-			return
-		}
-
+	// Save status data to database
+	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
 		statusData := s.buildStatusData(packet, deviceIMEI)
-
-		// Save to database
 		if err := db.GetDB().Create(&statusData).Error; err != nil {
 			colors.PrintError("Error saving status data: %v", err)
 		} else {
@@ -224,27 +229,24 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 	}
 }
 
-// handleAlarmPacket processes ALARM_DATA packets
+// handleAlarmPacket processes alarm packets
 func (s *Server) handleAlarmPacket(packet *protocol.DecodedPacket, conn net.Conn) {
-	colors.PrintWarning("🚨 ALARM detected from %s: Type=%+v", conn.RemoteAddr(), packet.AlarmType)
+	colors.PrintWarning("Alarm from %s: Type=%+v", conn.RemoteAddr(), packet.AlarmType)
 }
 
-// sendResponse sends response packets back to IoT devices
+// sendResponse sends response back to device
 func (s *Server) sendResponse(packet *protocol.DecodedPacket, conn net.Conn, decoder *protocol.GT06Decoder) {
-	imei := packet.TerminalID
-	colors.PrintData("📤", "Preparing response for IMEI: %s", imei)
-
 	response := decoder.GenerateResponse(uint16(packet.SerialNumber), packet.Protocol)
 
 	_, err := conn.Write(response)
 	if err != nil {
 		colors.PrintError("Error sending response to %s: %v", conn.RemoteAddr(), err)
 	} else {
-		colors.PrintSuccess("Response sent to %s: %X", conn.RemoteAddr(), response)
+		colors.PrintData("📤", "Sent response to %s: %X", conn.RemoteAddr(), response)
 	}
 }
 
-// buildGPSData constructs GPS data model from packet
+// buildGPSData creates a GPSData model from decoded packet
 func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
 	gpsData := models.GPSData{
 		IMEI:         deviceIMEI,
@@ -253,7 +255,7 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 		RawPacket:    packet.Raw,
 	}
 
-	// Copy GPS data
+	// GPS location data
 	if packet.Latitude != nil {
 		gpsData.Latitude = packet.Latitude
 	}
@@ -272,6 +274,8 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 		satellites := int(*packet.Satellites)
 		gpsData.Satellites = &satellites
 	}
+
+	// GPS status
 	if packet.GPSRealTime != nil {
 		gpsData.GPSRealTime = packet.GPSRealTime
 	}
@@ -279,7 +283,14 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 		gpsData.GPSPositioned = packet.GPSPositioned
 	}
 
-	// LBS Data
+	// Device status
+	gpsData.Ignition = packet.Ignition
+	gpsData.Charger = packet.Charger
+	gpsData.GPSTracking = packet.GPSTracking
+	gpsData.OilElectricity = packet.OilElectricity
+	gpsData.DeviceStatus = packet.DeviceStatus
+
+	// LBS data
 	if packet.MCC != nil {
 		mcc := int(*packet.MCC)
 		gpsData.MCC = &mcc
@@ -292,9 +303,9 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 	return gpsData
 }
 
-// buildStatusData constructs status data model from packet
+// buildStatusData creates a GPSData model for status information
 func (s *Server) buildStatusData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
-	gpsData := models.GPSData{
+	statusData := models.GPSData{
 		IMEI:           deviceIMEI,
 		Timestamp:      packet.Timestamp,
 		ProtocolName:   packet.ProtocolName,
@@ -306,26 +317,26 @@ func (s *Server) buildStatusData(packet *protocol.DecodedPacket, deviceIMEI stri
 		DeviceStatus:   packet.DeviceStatus,
 	}
 
-	// Voltage info
+	// Voltage information
 	if packet.Voltage != nil {
 		voltageLevel := int(packet.Voltage.Level)
-		gpsData.VoltageLevel = &voltageLevel
-		gpsData.VoltageStatus = packet.Voltage.Status
+		statusData.VoltageLevel = &voltageLevel
+		statusData.VoltageStatus = packet.Voltage.Status
 	}
 
-	// GSM info
+	// GSM information
 	if packet.GSMSignal != nil {
 		gsmSignal := int(packet.GSMSignal.Level)
-		gpsData.GSMSignal = &gsmSignal
-		gpsData.GSMStatus = packet.GSMSignal.Status
+		statusData.GSMSignal = &gsmSignal
+		statusData.GSMStatus = packet.GSMSignal.Status
 	}
 
-	// Alarm info
+	// Alarm information
 	if packet.Alarm != nil {
-		gpsData.AlarmActive = packet.Alarm.Active
-		gpsData.AlarmType = packet.Alarm.Type
-		gpsData.AlarmCode = packet.Alarm.Code
+		statusData.AlarmActive = packet.Alarm.Active
+		statusData.AlarmType = packet.Alarm.Type
+		statusData.AlarmCode = packet.Alarm.Code
 	}
 
-	return gpsData
+	return statusData
 }

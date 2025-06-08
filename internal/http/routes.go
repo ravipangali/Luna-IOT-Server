@@ -27,6 +27,9 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		controlController = controllers.NewControlController()
 	}
 
+	// WebSocket endpoint for real-time data
+	router.GET("/ws", HandleWebSocket)
+
 	// API version 1
 	v1 := router.Group("/api/v1")
 	{
@@ -91,8 +94,10 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"status":  "ok",
-			"message": "Luna IoT Server is running",
+			"status":    "ok",
+			"message":   "Luna IoT Server is running",
+			"websocket": "/ws",
+			"api":       "/api/v1",
 		})
 	})
 }

@@ -30,6 +30,9 @@ func NewServer(port string) *Server {
 	router.Use(gin.Recovery())
 	router.Use(CORSMiddleware())
 
+	// Initialize WebSocket hub
+	InitializeWebSocket()
+
 	// Setup routes
 	SetupRoutes(router)
 
@@ -55,6 +58,9 @@ func NewServerWithController(port string, sharedController *controllers.ControlC
 	router.Use(gin.Recovery())
 	router.Use(CORSMiddleware())
 
+	// Initialize WebSocket hub
+	InitializeWebSocket()
+
 	// Setup routes with shared control controller
 	SetupRoutesWithControlController(router, sharedController)
 
@@ -67,6 +73,7 @@ func NewServerWithController(port string, sharedController *controllers.ControlC
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	colors.PrintServer("🌐", "HTTP REST API Server starting on port %s", s.port)
+	colors.PrintServer("🔗", "WebSocket endpoint available at /ws for real-time data")
 	return s.router.Run(":" + s.port)
 }
 
