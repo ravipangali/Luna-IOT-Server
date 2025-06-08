@@ -31,8 +31,8 @@ type Vehicle struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// Relationship
-	Device Device `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	// Relationship - Make Device optional and fix constraint
+	Device Device `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
 // TableName specifies the table name for Vehicle model

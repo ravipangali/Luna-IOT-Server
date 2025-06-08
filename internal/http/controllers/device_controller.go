@@ -315,33 +315,31 @@ func (dc *DeviceController) CreateDevice(c *gin.Context) {
 		return
 	}
 
-	// Attempt to create device
+	// Save the device to the database
 	colors.PrintInfo("💾 Attempting to save device to database...")
 	if err := db.GetDB().Create(&device).Error; err != nil {
 		colors.PrintError("❌ Database error while creating device: %v", err)
 
-		// Check for specific database errors
-		if strings.Contains(strings.ToLower(err.Error()), "duplicate") ||
-			strings.Contains(strings.ToLower(err.Error()), "unique") {
-			c.JSON(http.StatusConflict, gin.H{
-				"success":        false,
-				"error":          "Device data conflicts with existing records",
-				"database_error": err.Error(),
-			})
-		} else if strings.Contains(strings.ToLower(err.Error()), "connection") {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"success":        false,
-				"error":          "Database connection issue",
-				"message":        "Please try again later",
-				"database_error": err.Error(),
-			})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success":        false,
-				"error":          "Failed to create device",
-				"database_error": err.Error(),
-			})
+		// Check for common database errors and provide user-friendly messages
+		errorMessage := "Failed to create device due to a database error"
+
+		if strings.Contains(err.Error(), "duplicate key") {
+			if strings.Contains(err.Error(), "devices_imei_key") {
+				errorMessage = "A device with this IMEI already exists"
+			}
+		} else if strings.Contains(err.Error(), "foreign key constraint") {
+			errorMessage = "Cannot create device: reference constraint failed"
+
+			if strings.Contains(err.Error(), "fk_vehicles_device") {
+				errorMessage = "This IMEI is already associated with a vehicle"
+			}
 		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   errorMessage,
+			"details": err.Error(),
+		})
 		return
 	}
 

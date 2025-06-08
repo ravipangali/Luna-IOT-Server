@@ -115,6 +115,12 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ User image column updated")
 
+	// Fix vehicle-device foreign key constraint
+	if err := fixVehicleDeviceConstraint(DB); err != nil {
+		return fmt.Errorf("failed to fix vehicle-device constraint: %v", err)
+	}
+	colors.PrintSuccess("✓ Vehicle-device relationship fixed")
+
 	colors.PrintHeader("DATABASE MIGRATIONS COMPLETED SUCCESSFULLY")
 	return nil
 }

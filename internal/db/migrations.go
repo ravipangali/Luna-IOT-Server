@@ -23,6 +23,12 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
+	// Fix the foreign key constraint between vehicles and devices
+	if err := fixVehicleDeviceConstraint(db); err != nil {
+		colors.PrintError("Failed to fix vehicle-device constraint: %v", err)
+		return err
+	}
+
 	colors.PrintSuccess("Database migrations completed successfully")
 	return nil
 }
@@ -48,5 +54,41 @@ func updateImageColumnToText(db *gorm.DB) error {
 		colors.PrintInfo("users.image column is already TEXT type, no update needed")
 	}
 
+	return nil
+}
+
+// fixVehicleDeviceConstraint fixes the foreign key constraint between vehicles and devices
+func fixVehicleDeviceConstraint(db *gorm.DB) error {
+	colors.PrintInfo("Checking device-vehicle foreign key constraint...")
+
+	// First check if the constraint exists
+	var constraintExists int64
+	err := db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.table_constraints 
+		WHERE constraint_name = 'fk_vehicles_device' 
+		AND table_name = 'vehicles'
+	`).Count(&constraintExists).Error
+
+	if err != nil {
+		return err
+	}
+
+	if constraintExists > 0 {
+		colors.PrintInfo("Found problematic constraint 'fk_vehicles_device', removing it...")
+
+		// Drop the existing constraint
+		if err := db.Exec("ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS fk_vehicles_device").Error; err != nil {
+			colors.PrintError("Failed to drop constraint: %v", err)
+			return err
+		}
+
+		colors.PrintSuccess("Successfully removed the constraint")
+	} else {
+		colors.PrintInfo("Constraint 'fk_vehicles_device' not found, nothing to drop")
+	}
+
+	// We'll let the models re-create the constraints properly
+	colors.PrintInfo("Vehicle-device relationship will be recreated with proper constraints")
 	return nil
 }
