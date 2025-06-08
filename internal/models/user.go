@@ -23,7 +23,7 @@ type User struct {
 	Email     string         `json:"email" gorm:"size:100;uniqueIndex" validate:"required,email"`
 	Password  string         `json:"password" gorm:"size:255;not null" validate:"required,min=6"`
 	Role      UserRole       `json:"role" gorm:"type:integer;not null;default:1" validate:"required,oneof=0 1"`
-	Image     string         `json:"image" gorm:"size:255"`
+	Image     string         `json:"image" gorm:"type:text"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`

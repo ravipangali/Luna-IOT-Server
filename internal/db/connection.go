@@ -109,6 +109,12 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ GPS data table ready")
 
+	// Update the image column in the users table to TEXT type
+	if err := updateImageColumnToText(DB); err != nil {
+		return fmt.Errorf("failed to update image column: %v", err)
+	}
+	colors.PrintSuccess("✓ User image column updated")
+
 	colors.PrintHeader("DATABASE MIGRATIONS COMPLETED SUCCESSFULLY")
 	return nil
 }
