@@ -22,13 +22,25 @@ func NewVehicleController() *VehicleController {
 func (vc *VehicleController) GetVehicles(c *gin.Context) {
 	var vehicles []models.Vehicle
 
-	if err := db.GetDB().Preload("Device").Find(&vehicles).Error; err != nil {
+	// Load vehicles without trying to preload devices
+	if err := db.GetDB().Find(&vehicles).Error; err != nil {
+		colors.PrintError("Failed to fetch vehicles from database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch vehicles",
 		})
 		return
 	}
 
+	// Manually load device information for each vehicle
+	for i := range vehicles {
+		var device models.Device
+		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).First(&device).Error; err == nil {
+			vehicles[i].Device = device
+		}
+		// If device not found, continue without setting it (device will be empty)
+	}
+
+	colors.PrintInfo("Successfully fetched %d vehicles", len(vehicles))
 	c.JSON(http.StatusOK, gin.H{
 		"data":    vehicles,
 		"count":   len(vehicles),
@@ -47,11 +59,17 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	}
 
 	var vehicle models.Vehicle
-	if err := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle).Error; err != nil {
+	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Vehicle not found",
 		})
 		return
+	}
+
+	// Manually load device information
+	var device models.Device
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
+		vehicle.Device = device
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -65,11 +83,17 @@ func (vc *VehicleController) GetVehicleByRegNo(c *gin.Context) {
 	regNo := c.Param("reg_no")
 
 	var vehicle models.Vehicle
-	if err := db.GetDB().Preload("Device").Where("reg_no = ?", regNo).First(&vehicle).Error; err != nil {
+	if err := db.GetDB().Where("reg_no = ?", regNo).First(&vehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Vehicle not found",
 		})
 		return
+	}
+
+	// Manually load device information
+	var device models.Device
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
+		vehicle.Device = device
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -180,8 +204,10 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 		return
 	}
 
-	// Load the device relationship
-	db.GetDB().Preload("Device").Where("imei = ?", vehicle.IMEI).First(&vehicle)
+	// Manually load the device information
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
+		vehicle.Device = device
+	}
 
 	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s", vehicle.IMEI, vehicle.RegNo)
 	c.JSON(http.StatusCreated, gin.H{
@@ -227,8 +253,11 @@ func (vc *VehicleController) UpdateVehicle(c *gin.Context) {
 		return
 	}
 
-	// Load the device relationship
-	db.GetDB().Preload("Device").Where("imei = ?", vehicle.IMEI).First(&vehicle)
+	// Manually load the device information
+	var device models.Device
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
+		vehicle.Device = device
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":    vehicle,
@@ -271,11 +300,19 @@ func (vc *VehicleController) GetVehiclesByType(c *gin.Context) {
 	vehicleType := c.Param("type")
 
 	var vehicles []models.Vehicle
-	if err := db.GetDB().Preload("Device").Where("vehicle_type = ?", vehicleType).Find(&vehicles).Error; err != nil {
+	if err := db.GetDB().Where("vehicle_type = ?", vehicleType).Find(&vehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch vehicles",
 		})
 		return
+	}
+
+	// Manually load device information for each vehicle
+	for i := range vehicles {
+		var device models.Device
+		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).First(&device).Error; err == nil {
+			vehicles[i].Device = device
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
