@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
+	"luna_iot_server/pkg/colors"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -180,142 +180,75 @@ func (dc *DeviceController) CreateDevice(c *gin.Context) {
 	var device models.Device
 
 	if err := c.ShouldBindJSON(&device); err != nil {
-		details := make(map[string]string)
-		details["json_error"] = err.Error()
-		details["suggestion"] = "Please check the JSON format and required fields"
-
-		// Provide specific field requirements
-		details["required_fields"] = "imei, sim_no, sim_operator, protocol"
-		details["imei_format"] = "16 numeric digits"
-		details["example"] = `{"imei": "1234567890123456", "sim_no": "9841234567", "sim_operator": "Ncell", "protocol": "GT06"}`
-
-		dc.createErrorResponse(c, http.StatusBadRequest, "INVALID_REQUEST_DATA",
-			"Request data is invalid or malformed", details)
+		colors.PrintError("Invalid JSON in device creation request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request data",
+			"details": err.Error(),
+		})
 		return
 	}
+
+	colors.PrintInfo("Creating device: IMEI=%s, SimNo=%s, Operator=%s", device.IMEI, device.SimNo, device.SimOperator)
 
 	// Validate IMEI length
 	if len(device.IMEI) != 16 {
-		dc.createErrorResponse(c, http.StatusBadRequest, "INVALID_IMEI_LENGTH",
-			"IMEI must be exactly 16 digits",
-			map[string]string{
-				"provided_imei":   device.IMEI,
-				"provided_length": strconv.Itoa(len(device.IMEI)),
-				"expected_length": "16",
-				"suggestion":      "Please provide a valid 16-digit IMEI number",
-			})
+		colors.PrintWarning("Invalid IMEI length: %d (expected 16)", len(device.IMEI))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "IMEI must be exactly 16 digits",
+		})
 		return
 	}
 
-	// Validate IMEI contains only digits
+	// Validate IMEI is numeric
 	for _, char := range device.IMEI {
 		if char < '0' || char > '9' {
-			dc.createErrorResponse(c, http.StatusBadRequest, "INVALID_IMEI_CHARACTERS",
-				"IMEI must contain only numeric digits",
-				map[string]string{
-					"provided_imei":     device.IMEI,
-					"invalid_character": string(char),
-					"suggestion":        "Please ensure IMEI contains only numbers 0-9",
-				})
+			colors.PrintWarning("Invalid IMEI format: contains non-numeric characters")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "IMEI must contain only digits",
+			})
 			return
 		}
 	}
 
-	// Validate SIM number
-	if device.SimNo == "" {
-		dc.createErrorResponse(c, http.StatusBadRequest, "MISSING_SIM_NUMBER",
-			"SIM number is required",
-			map[string]string{
-				"field":      "sim_no",
-				"suggestion": "Please provide a valid SIM card number",
-			})
+	// Check if device with this IMEI already exists
+	var existingDevice models.Device
+	if err := db.GetDB().Where("imei = ?", device.IMEI).First(&existingDevice).Error; err == nil {
+		colors.PrintWarning("Device with IMEI %s already exists", device.IMEI)
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Device with this IMEI already exists",
+		})
 		return
 	}
 
 	// Validate SIM operator
-	if device.SimOperator == "" {
-		dc.createErrorResponse(c, http.StatusBadRequest, "MISSING_SIM_OPERATOR",
-			"SIM operator is required",
-			map[string]string{
-				"field":           "sim_operator",
-				"valid_operators": "Ncell, NTC, Smart Cell, etc.",
-				"suggestion":      "Please specify the SIM card operator",
-			})
+	if device.SimOperator != models.SimOperatorNcell && device.SimOperator != models.SimOperatorNtc {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":           "Invalid SIM operator",
+			"valid_operators": []string{string(models.SimOperatorNcell), string(models.SimOperatorNtc)},
+		})
 		return
 	}
 
-	// Validate protocol
-	validProtocols := []models.Protocol{models.ProtocolGT06}
-	isValidProtocol := false
-	for _, protocol := range validProtocols {
-		if device.Protocol == protocol {
-			isValidProtocol = true
-			break
-		}
-	}
-
-	if !isValidProtocol {
-		validProtocolStrings := make([]string, len(validProtocols))
-		for i, p := range validProtocols {
-			validProtocolStrings[i] = string(p)
-		}
-
-		dc.createErrorResponse(c, http.StatusBadRequest, "INVALID_PROTOCOL",
-			"Protocol is not supported",
-			map[string]string{
-				"provided_protocol":   string(device.Protocol),
-				"supported_protocols": strings.Join(validProtocolStrings, ", "),
-				"suggestion":          "Please use one of the supported protocols",
-			})
-		return
-	}
-
-	// Check if device with same IMEI already exists
-	var existingDevice models.Device
-	if err := db.GetDB().Where("imei = ?", device.IMEI).First(&existingDevice).Error; err == nil {
-		dc.createErrorResponse(c, http.StatusConflict, "DEVICE_ALREADY_EXISTS",
-			"A device with this IMEI already exists in the system",
-			map[string]string{
-				"imei":               device.IMEI,
-				"existing_device_id": strconv.Itoa(int(existingDevice.ID)),
-				"suggestion":         "Please use a different IMEI or update the existing device",
-			})
-		return
-	}
-
-	// Check if SIM number already exists
-	var existingSimDevice models.Device
-	if err := db.GetDB().Where("sim_no = ?", device.SimNo).First(&existingSimDevice).Error; err == nil {
-		dc.createErrorResponse(c, http.StatusConflict, "SIM_NUMBER_ALREADY_EXISTS",
-			"A device with this SIM number already exists",
-			map[string]string{
-				"sim_no":               device.SimNo,
-				"existing_device_imei": existingSimDevice.IMEI,
-				"suggestion":           "Please use a different SIM number or update the existing device",
-			})
-		return
+	// Set default protocol if not provided
+	if device.Protocol == "" {
+		device.Protocol = models.ProtocolGT06
 	}
 
 	if err := db.GetDB().Create(&device).Error; err != nil {
-		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "UNIQUE constraint") {
-			dc.createErrorResponse(c, http.StatusConflict, "DUPLICATE_DEVICE_DATA",
-				"Device with similar data already exists",
-				map[string]string{
-					"database_error": err.Error(),
-					"suggestion":     "Please check IMEI and SIM number for duplicates",
-				})
-		} else {
-			dc.createErrorResponse(c, http.StatusInternalServerError, "DATABASE_CREATE_ERROR",
-				"Failed to create device in database",
-				map[string]string{
-					"database_error": err.Error(),
-					"suggestion":     "Please try again or contact system administrator",
-				})
-		}
+		colors.PrintError("Failed to create device in database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to create device",
+			"details": err.Error(),
+		})
 		return
 	}
 
-	dc.createSuccessResponse(c, http.StatusCreated, "Device created successfully", device, 0)
+	colors.PrintSuccess("Device created successfully: ID=%d, IMEI=%s", device.ID, device.IMEI)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    device,
+		"message": "Device created successfully",
+	})
 }
 
 // UpdateDevice updates an existing device
