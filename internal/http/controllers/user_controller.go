@@ -198,6 +198,13 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
+	// Read raw body for debugging
+	body, _ := c.GetRawData()
+	colors.PrintDebug("📋 Update user raw request body: %s", string(body))
+
+	// Reset body for binding
+	c.Request.Body = io.NopCloser(strings.NewReader(string(body)))
+
 	var updateData models.User
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -206,7 +213,60 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
+	colors.PrintInfo("Updating user: ID=%d, Name=%s, Email=%s, Role=%d",
+		user.ID, updateData.Name, updateData.Email, updateData.Role)
+
+	// Special handling for password updates
+	hasPasswordField := false
+	for _, field := range []string{"password", "Password"} {
+		if strings.Contains(string(body), field) {
+			hasPasswordField = true
+			break
+		}
+	}
+
+	// If password field is present in the request but empty or invalid, don't update it
+	if hasPasswordField {
+		if strings.TrimSpace(updateData.Password) == "" {
+			colors.PrintInfo("Password field is empty in update request, ignoring password update")
+			updateData.Password = user.Password // Keep the original password
+		} else if len(updateData.Password) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Password must be at least 6 characters",
+			})
+			return
+		} else {
+			colors.PrintInfo("Password update detected for user ID=%d", user.ID)
+			// Password will be hashed by the User model's BeforeUpdate hook
+		}
+	} else {
+		// No password field in request, keep original password
+		updateData.Password = user.Password
+	}
+
+	// Validate email and phone uniqueness if they changed
+	if updateData.Email != user.Email {
+		var existingUser models.User
+		if err := db.GetDB().Where("email = ? AND id != ?", updateData.Email, user.ID).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Email already in use by another user",
+			})
+			return
+		}
+	}
+
+	if updateData.Phone != user.Phone {
+		var existingUser models.User
+		if err := db.GetDB().Where("phone = ? AND id != ?", updateData.Phone, user.ID).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Phone number already in use by another user",
+			})
+			return
+		}
+	}
+
 	if err := db.GetDB().Model(&user).Updates(updateData).Error; err != nil {
+		colors.PrintError("Failed to update user in database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to update user",
 		})
@@ -215,8 +275,10 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 
 	// Clear password before returning response
 	user.Password = ""
+	colors.PrintSuccess("User updated successfully: ID=%d", user.ID)
 
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    user,
 		"message": "User updated successfully",
 	})
