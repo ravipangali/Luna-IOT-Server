@@ -32,8 +32,8 @@ type Device struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// Relationships (has many vehicles)
-	// Note: This creates a reverse relationship without foreign key constraints
+	// No relationships - Device is completely independent
+	// Vehicles can reference devices by IMEI, but devices don't know about vehicles
 }
 
 // TableName specifies the table name for Device model

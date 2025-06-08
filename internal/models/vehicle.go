@@ -31,8 +31,9 @@ type Vehicle struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// Relationship - Make Device optional and fix constraint
-	Device Device `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	// Relationship - Reference device by IMEI but no foreign key constraint
+	// This allows devices to be created independently
+	Device Device `json:"device,omitempty" gorm:"-"`
 }
 
 // TableName specifies the table name for Vehicle model
@@ -46,5 +47,20 @@ func (v *Vehicle) BeforeCreate(tx *gorm.DB) error {
 	if v.Overspeed <= 0 {
 		v.Overspeed = 60 // Default overspeed limit
 	}
+	return nil
+}
+
+// LoadDevice manually loads the associated device for this vehicle
+func (v *Vehicle) LoadDevice(db *gorm.DB) error {
+	if v.IMEI == "" {
+		return nil // No IMEI, no device to load
+	}
+
+	var device Device
+	if err := db.Where("imei = ?", v.IMEI).First(&device).Error; err != nil {
+		return err // Device not found or database error
+	}
+
+	v.Device = device
 	return nil
 }
