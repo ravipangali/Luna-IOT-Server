@@ -356,7 +356,8 @@ func (dc *DeviceController) UpdateDevice(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid device ID",
+			"success": false,
+			"error":   "Invalid device ID",
 		})
 		return
 	}
@@ -364,7 +365,8 @@ func (dc *DeviceController) UpdateDevice(c *gin.Context) {
 	var device models.Device
 	if err := db.GetDB().First(&device, uint(id)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Device not found",
+			"success": false,
+			"error":   "Device not found",
 		})
 		return
 	}
@@ -372,22 +374,62 @@ func (dc *DeviceController) UpdateDevice(c *gin.Context) {
 	var updateData models.Device
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"success": false,
+			"error":   "Invalid request data",
 		})
 		return
 	}
 
-	// Don't allow IMEI updates
+	// Don't allow IMEI updates for security reasons
+	// If you want to allow IMEI updates, comment out the line below and uncomment the validation section
 	updateData.IMEI = device.IMEI
+
+	/*
+		// Uncomment this section if you want to allow IMEI updates:
+		// Validate new IMEI if it's being changed
+		if updateData.IMEI != device.IMEI && updateData.IMEI != "" {
+			// Check IMEI format (must be 16 digits)
+			if len(updateData.IMEI) != 16 {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error": "IMEI must be exactly 16 digits",
+				})
+				return
+			}
+
+			// Validate IMEI contains only digits
+			for _, char := range updateData.IMEI {
+				if char < '0' || char > '9' {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"success": false,
+						"error": "IMEI must contain only digits",
+					})
+					return
+				}
+			}
+
+			// Check if new IMEI already exists
+			var existingDevice models.Device
+			if err := db.GetDB().Where("imei = ? AND id != ?", updateData.IMEI, device.ID).First(&existingDevice).Error; err == nil {
+				c.JSON(http.StatusConflict, gin.H{
+					"success": false,
+					"error": "Device with this IMEI already exists",
+				})
+				return
+			}
+		}
+	*/
 
 	if err := db.GetDB().Model(&device).Updates(updateData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to update device",
+			"success": false,
+			"error":   "Failed to update device",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    device,
 		"message": "Device updated successfully",
 	})
