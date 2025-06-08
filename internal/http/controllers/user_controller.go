@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,6 +33,11 @@ func (uc *UserController) GetUsers(c *gin.Context) {
 		return
 	}
 
+	// Clear passwords before returning response
+	for i := range users {
+		users[i].Password = ""
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    users,
@@ -58,6 +64,9 @@ func (uc *UserController) GetUser(c *gin.Context) {
 		return
 	}
 
+	// Clear password before returning response
+	user.Password = ""
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    user,
@@ -69,6 +78,13 @@ func (uc *UserController) GetUser(c *gin.Context) {
 func (uc *UserController) CreateUser(c *gin.Context) {
 	var user models.User
 
+	// Log the raw request body for debugging
+	body, _ := c.GetRawData()
+	colors.PrintDebug("Raw request body: %s", string(body))
+
+	// Reset the request body for binding
+	c.Request.Body = io.NopCloser(strings.NewReader(string(body)))
+
 	if err := c.ShouldBindJSON(&user); err != nil {
 		colors.PrintError("Invalid JSON in user creation request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -79,6 +95,7 @@ func (uc *UserController) CreateUser(c *gin.Context) {
 	}
 
 	colors.PrintInfo("Creating user: Name=%s, Email=%s, Role=%d", user.Name, user.Email, user.Role)
+	colors.PrintDebug("Password received: %t (length: %d)", user.Password != "", len(user.Password))
 
 	// Validate required fields
 	if strings.TrimSpace(user.Name) == "" {
@@ -154,6 +171,8 @@ func (uc *UserController) CreateUser(c *gin.Context) {
 	}
 
 	colors.PrintSuccess("User created successfully: ID=%d, Email=%s", user.ID, user.Email)
+	// Clear password before returning response
+	user.Password = ""
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data":    user,
@@ -193,6 +212,9 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		})
 		return
 	}
+
+	// Clear password before returning response
+	user.Password = ""
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":    user,

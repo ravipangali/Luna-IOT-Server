@@ -21,7 +21,7 @@ type User struct {
 	Name      string         `json:"name" gorm:"size:100;not null" validate:"required,min=2,max=100"`
 	Phone     string         `json:"phone" gorm:"size:15;uniqueIndex" validate:"required,min=10,max=15"`
 	Email     string         `json:"email" gorm:"size:100;uniqueIndex" validate:"required,email"`
-	Password  string         `json:"-" gorm:"size:255;not null" validate:"required,min=6"`
+	Password  string         `json:"password" gorm:"size:255;not null" validate:"required,min=6"`
 	Role      UserRole       `json:"role" gorm:"type:integer;not null;default:1" validate:"required,oneof=0 1"`
 	Image     string         `json:"image" gorm:"size:255"`
 	CreatedAt time.Time      `json:"created_at"`
