@@ -5,6 +5,7 @@ import (
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
+	"luna_iot_server/pkg/colors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -82,16 +83,58 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	var vehicle models.Vehicle
 
 	if err := c.ShouldBindJSON(&vehicle); err != nil {
+		colors.PrintError("Invalid JSON in vehicle creation request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
+			"details": err.Error(),
 		})
 		return
 	}
 
+	colors.PrintInfo("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s", vehicle.IMEI, vehicle.RegNo, vehicle.VehicleType)
+
 	// Validate IMEI length
 	if len(vehicle.IMEI) != 16 {
+		colors.PrintWarning("Invalid IMEI length: %d (expected 16)", len(vehicle.IMEI))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "IMEI must be exactly 16 digits",
+		})
+		return
+	}
+
+	// Validate IMEI contains only digits
+	for _, char := range vehicle.IMEI {
+		if char < '0' || char > '9' {
+			colors.PrintWarning("Invalid IMEI format: contains non-digit characters")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "IMEI must contain only digits",
+			})
+			return
+		}
+	}
+
+	// Validate vehicle type
+	validTypes := []models.VehicleType{
+		models.VehicleTypeBike,
+		models.VehicleTypeCar,
+		models.VehicleTypeTruck,
+		models.VehicleTypeBus,
+		models.VehicleTypeSchoolBus,
+	}
+
+	isValidType := false
+	for _, validType := range validTypes {
+		if vehicle.VehicleType == validType {
+			isValidType = true
+			break
+		}
+	}
+
+	if !isValidType {
+		colors.PrintWarning("Invalid vehicle type: %s", vehicle.VehicleType)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":       "Invalid vehicle type",
+			"valid_types": []string{"bike", "car", "truck", "bus", "school_bus"},
 		})
 		return
 	}
@@ -99,8 +142,10 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Check if device exists
 	var device models.Device
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err != nil {
+		colors.PrintWarning("Device with IMEI %s not found in database", vehicle.IMEI)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Device with this IMEI does not exist",
+			"hint":  "Please register the device first",
 		})
 		return
 	}
@@ -108,6 +153,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Check if vehicle with same registration number already exists
 	var existingVehicle models.Vehicle
 	if err := db.GetDB().Where("reg_no = ?", vehicle.RegNo).First(&existingVehicle).Error; err == nil {
+		colors.PrintWarning("Vehicle with registration number %s already exists", vehicle.RegNo)
 		c.JSON(http.StatusConflict, gin.H{
 			"error": "Vehicle with this registration number already exists",
 		})
@@ -116,15 +162,20 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 
 	// Check if this IMEI is already assigned to another vehicle
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&existingVehicle).Error; err == nil {
+		colors.PrintWarning("IMEI %s is already assigned to vehicle %s", vehicle.IMEI, existingVehicle.RegNo)
 		c.JSON(http.StatusConflict, gin.H{
-			"error": "This device is already assigned to another vehicle",
+			"error":            "This device is already assigned to another vehicle",
+			"existing_vehicle": existingVehicle.RegNo,
 		})
 		return
 	}
 
+	// Create the vehicle
 	if err := db.GetDB().Create(&vehicle).Error; err != nil {
+		colors.PrintError("Failed to create vehicle in database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to create vehicle",
+			"error":   "Failed to create vehicle",
+			"details": err.Error(),
 		})
 		return
 	}
@@ -132,6 +183,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Load the device relationship
 	db.GetDB().Preload("Device").Where("imei = ?", vehicle.IMEI).First(&vehicle)
 
+	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s", vehicle.IMEI, vehicle.RegNo)
 	c.JSON(http.StatusCreated, gin.H{
 		"data":    vehicle,
 		"message": "Vehicle created successfully",
