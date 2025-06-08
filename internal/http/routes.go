@@ -41,6 +41,10 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			users.POST("", userController.CreateUser)
 			users.PUT("/:id", userController.UpdateUser)
 			users.DELETE("/:id", userController.DeleteUser)
+
+			// User image routes
+			users.GET("/:id/image", userController.GetUserImage)
+			users.DELETE("/:id/image", userController.DeleteUserImage)
 		}
 
 		// Device routes
