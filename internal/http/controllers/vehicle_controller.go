@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"strconv"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
@@ -21,9 +22,38 @@ func NewVehicleController() *VehicleController {
 // GetVehicles returns all vehicles with their associated devices
 func (vc *VehicleController) GetVehicles(c *gin.Context) {
 	var vehicles []models.Vehicle
+	var totalCount int64
 
-	// Load vehicles without trying to preload devices
-	if err := db.GetDB().Find(&vehicles).Error; err != nil {
+	// Get page and limit parameters
+	page := 1
+	limit := 10
+
+	if p := c.Query("page"); p != "" {
+		if parsedPage := parseInt(p); parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+
+	if l := c.Query("limit"); l != "" {
+		if parsedLimit := parseInt(l); parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	// Count total vehicles for pagination
+	if err := db.GetDB().Model(&models.Vehicle{}).Count(&totalCount).Error; err != nil {
+		colors.PrintError("Failed to count vehicles: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to count vehicles",
+		})
+		return
+	}
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Load vehicles with pagination
+	if err := db.GetDB().Limit(limit).Offset(offset).Find(&vehicles).Error; err != nil {
 		colors.PrintError("Failed to fetch vehicles from database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch vehicles",
@@ -40,12 +70,29 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 		// If device not found, continue without setting it (device will be empty)
 	}
 
-	colors.PrintInfo("Successfully fetched %d vehicles", len(vehicles))
+	// Calculate total pages
+	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
+
+	colors.PrintInfo("Successfully fetched %d vehicles (page %d of %d)", len(vehicles), page, totalPages)
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    vehicles,
-		"count":   len(vehicles),
+		"pagination": gin.H{
+			"current_page": page,
+			"per_page":     limit,
+			"total":        totalCount,
+			"total_pages":  totalPages,
+		},
 		"message": "Vehicles retrieved successfully",
 	})
+}
+
+// Helper function to parse integer
+func parseInt(s string) int {
+	if i, err := strconv.Atoi(s); err == nil {
+		return i
+	}
+	return 0
 }
 
 // GetVehicle returns a single vehicle by IMEI
