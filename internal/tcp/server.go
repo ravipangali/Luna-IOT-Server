@@ -109,42 +109,54 @@ func (s *Server) handleConnection(conn net.Conn) {
 			colors.PrintData("📦", "Raw data from %s: %X", conn.RemoteAddr(), buffer[:n])
 
 			// Process data through GT06 decoder
-			packets, err := decoder.AddData(buffer[:n])
+			packet, err := decoder.AddData(buffer[:n])
 			if err != nil {
 				colors.PrintError("Error decoding data from %s: %v", conn.RemoteAddr(), err)
 				continue
 			}
 
-			// Process each decoded packet
-			for _, packet := range packets {
-				colors.PrintData("📋", "Decoded packet from %s:", conn.RemoteAddr())
-
-				// Convert packet to JSON for pretty printing
-				jsonData, err := json.MarshalIndent(packet, "", "  ")
-				if err != nil {
-					colors.PrintError("Error marshaling packet to JSON: %v", err)
-					colors.PrintDebug("Packet: %+v", packet)
-				} else {
-					colors.PrintDebug("Packet Data:\n%s", jsonData)
-				}
-
-				// Handle different packet types
-				switch packet.ProtocolName {
-				case "LOGIN":
-					deviceIMEI = s.handleLoginPacket(packet, conn)
-				case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
-					s.handleGPSPacket(packet, conn, deviceIMEI)
-				case "STATUS_INFO":
-					s.handleStatusPacket(packet, conn, deviceIMEI)
-				case "ALARM_DATA":
-					s.handleAlarmPacket(packet, conn)
-				}
-
-				// Send response if required
-				if packet.NeedsResponse {
-					s.sendResponse(packet, conn, decoder)
-				}
+			jsonData, err := json.MarshalIndent(packet, "", "  ")
+			if err != nil {
+				colors.PrintError("Error marshaling packet to JSON: %v", err)
+				colors.PrintDebug("Packet: %+v", packet)
+			} else {
+				colors.PrintDebug("Packet Data:\n%s", jsonData)
 			}
+
+			if packet.NeedsResponse {
+				s.sendResponse(packet, conn, decoder)
+			}
+
+			// Process each decoded packet
+			// for _, packet := range packets {
+			// 	colors.PrintData("📋", "Decoded packet from %s:", conn.RemoteAddr())
+
+			// 	// Convert packet to JSON for pretty printing
+			// 	jsonData, err := json.MarshalIndent(packet, "", "  ")
+			// 	if err != nil {
+			// 		colors.PrintError("Error marshaling packet to JSON: %v", err)
+			// 		colors.PrintDebug("Packet: %+v", packet)
+			// 	} else {
+			// 		colors.PrintDebug("Packet Data:\n%s", jsonData)
+			// 	}
+
+			// 	// Handle different packet types
+			// 	switch packet.ProtocolName {
+			// 	case "LOGIN":
+			// 		deviceIMEI = s.handleLoginPacket(packet, conn)
+			// 	case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
+			// 		s.handleGPSPacket(packet, conn, deviceIMEI)
+			// 	case "STATUS_INFO":
+			// 		s.handleStatusPacket(packet, conn, deviceIMEI)
+			// 	case "ALARM_DATA":
+			// 		s.handleAlarmPacket(packet, conn)
+			// 	}
+
+			// 	// Send response if required
+			// 	if packet.NeedsResponse {
+			// 		s.sendResponse(packet, conn, decoder)
+			// 	}
+			// }
 		}
 	}
 }

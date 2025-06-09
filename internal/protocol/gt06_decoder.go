@@ -135,7 +135,7 @@ func NewGT06Decoder() *GT06Decoder {
 }
 
 // AddData adds new data to the buffer and processes it
-func (d *GT06Decoder) AddData(data []byte) ([]*DecodedPacket, error) {
+func (d *GT06Decoder) AddData(data []byte) (*DecodedPacket, error) {
 	d.clearBuffer()
 	d.buffer = append(d.buffer, data...)
 	return d.processBuffer()
@@ -147,8 +147,10 @@ func (d *GT06Decoder) clearBuffer() {
 }
 
 // processBuffer processes the buffer and extracts packets
-func (d *GT06Decoder) processBuffer() ([]*DecodedPacket, error) {
-	var packets []*DecodedPacket
+func (d *GT06Decoder) processBuffer() (*DecodedPacket, error) {
+	// var packets []*DecodedPacket
+	var decoded *DecodedPacket
+	var err error
 
 	for len(d.buffer) >= 5 {
 		startInfo := d.findStartBits()
@@ -176,18 +178,16 @@ func (d *GT06Decoder) processBuffer() ([]*DecodedPacket, error) {
 		packet := d.buffer[0:totalLength]
 
 		if packet[totalLength-2] == 0x0D && packet[totalLength-1] == 0x0A {
-			decoded, err := d.decodePacket(packet)
+			decoded, err = d.decodePacket(packet)
 			if err != nil {
 				colors.PrintError("Error decoding packet: %v", err)
-			} else if decoded != nil {
-				packets = append(packets, decoded)
 			}
 		}
 
 		d.buffer = d.buffer[totalLength:]
 	}
 
-	return packets, nil
+	return decoded, nil
 }
 
 // findStartBits finds the start bits in the buffer
