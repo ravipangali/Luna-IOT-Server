@@ -22,7 +22,7 @@ func NewAuthController() *AuthController {
 
 // LoginRequest represents the login request body
 type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
+	Phone    string `json:"phone" binding:"required,min=10,max=15"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -32,7 +32,7 @@ type RegisterRequest struct {
 	Phone    string          `json:"phone" binding:"required,min=10,max=15"`
 	Email    string          `json:"email" binding:"required,email"`
 	Password string          `json:"password" binding:"required,min=6"`
-	Role     models.UserRole `json:"role" binding:"required,oneof=0 1"`
+	Role     models.UserRole `json:"role,omitempty"` // Optional, defaults to client (1)
 	Image    string          `json:"image,omitempty"`
 }
 
@@ -58,17 +58,17 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	colors.PrintInfo("Login attempt for email: %s", req.Email)
+	colors.PrintInfo("Login attempt for phone: %s", req.Phone)
 
-	// Find user by email
+	// Find user by phone number
 	var user models.User
-	if err := db.GetDB().Where("email = ?", req.Email).First(&user).Error; err != nil {
+	if err := db.GetDB().Where("phone = ?", req.Phone).First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			colors.PrintWarning("Login failed: User not found for email %s", req.Email)
+			colors.PrintWarning("Login failed: User not found for phone %s", req.Phone)
 			c.JSON(http.StatusUnauthorized, AuthResponse{
 				Success: false,
 				Error:   "Invalid credentials",
-				Message: "Email or password is incorrect",
+				Message: "Phone number or password is incorrect",
 			})
 			return
 		}
@@ -83,18 +83,18 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	// Check password
 	if !user.CheckPassword(req.Password) {
-		colors.PrintWarning("Login failed: Invalid password for email %s", req.Email)
+		colors.PrintWarning("Login failed: Invalid password for phone %s", req.Phone)
 		c.JSON(http.StatusUnauthorized, AuthResponse{
 			Success: false,
 			Error:   "Invalid credentials",
-			Message: "Email or password is incorrect",
+			Message: "Phone number or password is incorrect",
 		})
 		return
 	}
 
 	// Generate new token
 	if err := user.GenerateToken(); err != nil {
-		colors.PrintError("Failed to generate token for user %s: %v", req.Email, err)
+		colors.PrintError("Failed to generate token for user %s: %v", req.Phone, err)
 		c.JSON(http.StatusInternalServerError, AuthResponse{
 			Success: false,
 			Error:   "Failed to generate authentication token",
@@ -105,7 +105,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	// Save token to database
 	if err := db.GetDB().Save(&user).Error; err != nil {
-		colors.PrintError("Failed to save token for user %s: %v", req.Email, err)
+		colors.PrintError("Failed to save token for user %s: %v", req.Phone, err)
 		c.JSON(http.StatusInternalServerError, AuthResponse{
 			Success: false,
 			Error:   "Failed to save authentication token",
@@ -114,7 +114,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	colors.PrintSuccess("User %s logged in successfully", req.Email)
+	colors.PrintSuccess("User %s logged in successfully", req.Phone)
 	c.JSON(http.StatusOK, AuthResponse{
 		Success: true,
 		Message: "Login successful",
@@ -181,13 +181,20 @@ func (ac *AuthController) Register(c *gin.Context) {
 		}
 	}
 
+	// Default role to client (1) if not provided or is 0
+	role := req.Role
+	if role == models.UserRole(0) {
+		// Frontend now always sends role=1, but if somehow 0 is sent, default to client
+		role = models.UserRoleClient
+	}
+
 	// Create new user
 	user := models.User{
 		Name:     req.Name,
 		Phone:    req.Phone,
 		Email:    req.Email,
 		Password: req.Password, // Will be hashed by BeforeCreate hook
-		Role:     req.Role,
+		Role:     role,
 		Image:    req.Image,
 	}
 
