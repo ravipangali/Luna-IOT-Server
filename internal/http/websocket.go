@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
 	"net/http"
@@ -42,6 +43,7 @@ type GPSUpdate struct {
 	DeviceName   string   `json:"device_name,omitempty"`
 	VehicleName  string   `json:"vehicle_name,omitempty"`
 	RegNo        string   `json:"reg_no,omitempty"`
+	VehicleType  string   `json:"vehicle_type,omitempty"`
 	Latitude     *float64 `json:"latitude"`
 	Longitude    *float64 `json:"longitude"`
 	Speed        *int     `json:"speed"`
@@ -49,14 +51,60 @@ type GPSUpdate struct {
 	Ignition     string   `json:"ignition"`
 	Timestamp    string   `json:"timestamp"`
 	ProtocolName string   `json:"protocol_name"`
+
+	// Enhanced status information
+	Battery      *BatteryInfo `json:"battery,omitempty"`
+	Signal       *SignalInfo  `json:"signal,omitempty"`
+	DeviceStatus *DeviceInfo  `json:"device_status,omitempty"`
+	AlarmStatus  *AlarmInfo   `json:"alarm_status,omitempty"`
 }
 
 // DeviceStatus represents device connection status
 type DeviceStatus struct {
-	IMEI       string `json:"imei"`
-	Status     string `json:"status"` // "connected", "disconnected"
-	LastSeen   string `json:"last_seen"`
-	VehicleReg string `json:"vehicle_reg,omitempty"`
+	IMEI        string       `json:"imei"`
+	Status      string       `json:"status"` // "connected", "disconnected"
+	LastSeen    string       `json:"last_seen"`
+	VehicleReg  string       `json:"vehicle_reg,omitempty"`
+	VehicleName string       `json:"vehicle_name,omitempty"`
+	VehicleType string       `json:"vehicle_type,omitempty"`
+	Battery     *BatteryInfo `json:"battery,omitempty"`
+	Signal      *SignalInfo  `json:"signal,omitempty"`
+}
+
+// BatteryInfo represents battery/voltage information
+type BatteryInfo struct {
+	Level    int    `json:"level"`    // 0-100 percentage
+	Voltage  int    `json:"voltage"`  // Raw voltage level
+	Status   string `json:"status"`   // "Normal", "Low", "Critical"
+	Charging bool   `json:"charging"` // Whether charger is connected
+}
+
+// SignalInfo represents GSM signal information
+type SignalInfo struct {
+	Level      int    `json:"level"`      // Raw signal level
+	Bars       int    `json:"bars"`       // 0-5 bars
+	Status     string `json:"status"`     // "Excellent", "Good", "Fair", "Poor", "No Signal"
+	Percentage int    `json:"percentage"` // 0-100 percentage
+}
+
+// DeviceInfo represents detailed device status
+type DeviceInfo struct {
+	Activated     bool `json:"activated"`
+	GPSTracking   bool `json:"gps_tracking"`
+	OilConnected  bool `json:"oil_connected"`
+	EngineRunning bool `json:"engine_running"`
+	Satellites    int  `json:"satellites"`
+}
+
+// AlarmInfo represents alarm status
+type AlarmInfo struct {
+	Active    bool   `json:"active"`
+	Type      string `json:"type"`
+	Code      int    `json:"code"`
+	Emergency bool   `json:"emergency"`
+	Overspeed bool   `json:"overspeed"`
+	LowPower  bool   `json:"low_power"`
+	Shock     bool   `json:"shock"`
 }
 
 // Global WebSocket hub instance
@@ -109,10 +157,67 @@ func (h *WebSocketHub) Run() {
 
 // BroadcastGPSUpdate sends GPS data to all connected clients
 func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
+	// Get vehicle type information
+	var vehicle models.Vehicle
+	vehicleType := ""
+	if err := db.GetDB().Where("imei = ?", gpsData.IMEI).First(&vehicle).Error; err == nil {
+		vehicleType = string(vehicle.VehicleType)
+	}
+
+	// Build battery information
+	var battery *BatteryInfo
+	if gpsData.VoltageLevel != nil {
+		battery = &BatteryInfo{
+			Level:    getVoltagePercentage(*gpsData.VoltageLevel),
+			Voltage:  *gpsData.VoltageLevel,
+			Status:   gpsData.VoltageStatus,
+			Charging: gpsData.Charger == "CONNECTED",
+		}
+	}
+
+	// Build signal information
+	var signal *SignalInfo
+	if gpsData.GSMSignal != nil {
+		signal = &SignalInfo{
+			Level:      *gpsData.GSMSignal,
+			Bars:       getSignalBars(*gpsData.GSMSignal),
+			Status:     gpsData.GSMStatus,
+			Percentage: getSignalPercentage(*gpsData.GSMSignal),
+		}
+	}
+
+	// Build device status information
+	deviceStatus := &DeviceInfo{
+		Activated:     gpsData.DeviceStatus == "ACTIVATED",
+		GPSTracking:   gpsData.GPSTracking == "ENABLED",
+		OilConnected:  gpsData.OilElectricity == "CONNECTED",
+		EngineRunning: gpsData.Ignition == "ON",
+		Satellites:    0, // Will be set if available
+	}
+	if gpsData.Satellites != nil {
+		deviceStatus.Satellites = *gpsData.Satellites
+	}
+
+	// Build alarm information
+	var alarmStatus *AlarmInfo
+	if gpsData.AlarmActive {
+		alarmStatus = &AlarmInfo{
+			Active: gpsData.AlarmActive,
+			Type:   gpsData.AlarmType,
+			Code:   gpsData.AlarmCode,
+			// Parse alarm type for specific flags
+			Emergency: gpsData.AlarmType == "Emergency",
+			Overspeed: gpsData.AlarmType == "Overspeed",
+			LowPower:  gpsData.AlarmType == "Low Power",
+			Shock:     gpsData.AlarmType == "Shock",
+		}
+	}
+
 	update := GPSUpdate{
 		IMEI:         gpsData.IMEI,
 		VehicleName:  vehicleName,
 		RegNo:        regNo,
+		VehicleType:  vehicleType,
 		Latitude:     gpsData.Latitude,
 		Longitude:    gpsData.Longitude,
 		Speed:        gpsData.Speed,
@@ -120,6 +225,10 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		Ignition:     gpsData.Ignition,
 		Timestamp:    gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
 		ProtocolName: gpsData.ProtocolName,
+		Battery:      battery,
+		Signal:       signal,
+		DeviceStatus: deviceStatus,
+		AlarmStatus:  alarmStatus,
 	}
 
 	message := WebSocketMessage{
@@ -130,7 +239,7 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 
 	if data, err := json.Marshal(message); err == nil {
 		h.broadcast <- data
-		colors.PrintData("📡", "Broadcasted GPS update for IMEI %s to %d clients", gpsData.IMEI, len(h.clients))
+		colors.PrintData("📡", "Broadcasted enhanced GPS update for IMEI %s to %d clients", gpsData.IMEI, len(h.clients))
 	} else {
 		colors.PrintError("Error marshaling GPS update: %v", err)
 	}
@@ -194,4 +303,58 @@ func HandleWebSocket(c *gin.Context) {
 func InitializeWebSocket() {
 	WSHub = NewWebSocketHub()
 	go WSHub.Run()
+}
+
+// Helper functions for status calculations
+
+// getVoltagePercentage converts voltage level to percentage
+func getVoltagePercentage(level int) int {
+	// Voltage levels typically range from 0-255 or 0-100 depending on device
+	// This is a simplified calculation - adjust based on your device specifications
+	if level >= 100 {
+		return 100
+	}
+	if level <= 0 {
+		return 0
+	}
+
+	// Assume level is 0-100 range, or convert from 0-255 range
+	if level > 100 {
+		return (level * 100) / 255
+	}
+	return level
+}
+
+// getSignalBars converts GSM signal level to bars (0-5)
+func getSignalBars(level int) int {
+	// Convert signal level to bars (0-5)
+	if level >= 80 {
+		return 5
+	} else if level >= 60 {
+		return 4
+	} else if level >= 40 {
+		return 3
+	} else if level >= 20 {
+		return 2
+	} else if level > 0 {
+		return 1
+	}
+	return 0
+}
+
+// getSignalPercentage converts GSM signal level to percentage
+func getSignalPercentage(level int) int {
+	// Assume signal level is 0-100 range, or convert from other ranges
+	if level >= 100 {
+		return 100
+	}
+	if level <= 0 {
+		return 0
+	}
+
+	// If level is in 0-255 range, convert to percentage
+	if level > 100 {
+		return (level * 100) / 255
+	}
+	return level
 }

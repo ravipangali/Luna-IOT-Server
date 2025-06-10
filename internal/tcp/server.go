@@ -109,88 +109,101 @@ func (s *Server) handleConnection(conn net.Conn) {
 			colors.PrintData("📦", "Raw data from %s: %X", conn.RemoteAddr(), buffer[:n])
 
 			// Process data through GT06 decoder
-			packet, err := decoder.AddData(buffer[:n])
+			packets, err := decoder.AddData(buffer[:n])
 			if err != nil {
 				colors.PrintError("Error decoding data from %s: %v", conn.RemoteAddr(), err)
 				continue
 			}
 
-			jsonData, err := json.MarshalIndent(packet, "", "  ")
-			if err != nil {
-				colors.PrintError("Error marshaling packet to JSON: %v", err)
-				colors.PrintDebug("Packet: %+v", packet)
-			} else {
-				colors.PrintDebug("Packet Data:\n%s", jsonData)
-			}
-
-			if packet.NeedsResponse {
-				s.sendResponse(packet, conn, decoder)
-			}
-
 			// Process each decoded packet
-			// for _, packet := range packets {
-			// 	colors.PrintData("📋", "Decoded packet from %s:", conn.RemoteAddr())
+			for _, packet := range packets {
+				// Add null safety check
+				if packet == nil {
+					colors.PrintWarning("Received nil packet from %s, skipping...", conn.RemoteAddr())
+					continue
+				}
 
-			// 	// Convert packet to JSON for pretty printing
-			// 	jsonData, err := json.MarshalIndent(packet, "", "  ")
-			// 	if err != nil {
-			// 		colors.PrintError("Error marshaling packet to JSON: %v", err)
-			// 		colors.PrintDebug("Packet: %+v", packet)
-			// 	} else {
-			// 		colors.PrintDebug("Packet Data:\n%s", jsonData)
-			// 	}
+				colors.PrintData("📋", "Decoded packet from %s:", conn.RemoteAddr())
 
-			// 	// Handle different packet types
-			// 	switch packet.ProtocolName {
-			// 	case "LOGIN":
-			// 		deviceIMEI = s.handleLoginPacket(packet, conn)
-			// 	case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
-			// 		s.handleGPSPacket(packet, conn, deviceIMEI)
-			// 	case "STATUS_INFO":
-			// 		s.handleStatusPacket(packet, conn, deviceIMEI)
-			// 	case "ALARM_DATA":
-			// 		s.handleAlarmPacket(packet, conn)
-			// 	}
+				// Convert packet to JSON for pretty printing
+				jsonData, err := json.MarshalIndent(packet, "", "  ")
+				if err != nil {
+					colors.PrintError("Error marshaling packet to JSON: %v", err)
+					colors.PrintDebug("Packet: %+v", packet)
+				} else {
+					colors.PrintDebug("Packet Data:\n%s", jsonData)
+				}
 
-			// 	// Send response if required
-			// 	if packet.NeedsResponse {
-			// 		s.sendResponse(packet, conn, decoder)
-			// 	}
-			// }
+				// Add additional safety checks for packet fields
+				if packet.ProtocolName == "" {
+					colors.PrintWarning("Packet with empty protocol name from %s, skipping...", conn.RemoteAddr())
+					continue
+				}
+
+				// Handle different packet types
+				switch packet.ProtocolName {
+				case "LOGIN":
+					deviceIMEI = s.handleLoginPacket(packet, conn)
+				case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
+					s.handleGPSPacket(packet, conn, deviceIMEI)
+				case "STATUS_INFO":
+					s.handleStatusPacket(packet, conn, deviceIMEI)
+				case "ALARM_DATA":
+					s.handleAlarmPacket(packet, conn)
+				}
+
+				// Send response if required
+				if packet.NeedsResponse {
+					s.sendResponse(packet, conn, decoder)
+				}
+			}
 		}
 	}
 }
 
 // handleLoginPacket processes device login packets
 func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn) string {
-	if len(packet.TerminalID) >= 16 {
-		potentialIMEI := packet.TerminalID[:16]
-
-		// Validate device registration
-		if !s.isDeviceRegistered(potentialIMEI) {
-			colors.PrintError("Unauthorized device: %s", potentialIMEI)
-			conn.Close()
-			return ""
-		}
-
-		colors.PrintSuccess("Authorized device login: %s", potentialIMEI)
-		s.controlController.RegisterConnection(potentialIMEI, conn)
-
-		// Get vehicle info for WebSocket broadcast
-		var vehicle models.Vehicle
-		vehicleReg := ""
-		if err := db.GetDB().Where("imei = ?", potentialIMEI).First(&vehicle).Error; err == nil {
-			vehicleReg = vehicle.RegNo
-		}
-
-		// Broadcast device connection to WebSocket clients
-		if http.WSHub != nil {
-			http.WSHub.BroadcastDeviceStatus(potentialIMEI, "connected", vehicleReg)
-		}
-
-		return potentialIMEI
+	// Add safety checks
+	if packet == nil {
+		colors.PrintError("Received nil packet in handleLoginPacket")
+		return ""
 	}
-	return ""
+
+	if packet.TerminalID == "" {
+		colors.PrintWarning("Login packet with empty TerminalID from %s", conn.RemoteAddr())
+		return ""
+	}
+
+	if len(packet.TerminalID) < 16 {
+		colors.PrintWarning("Login packet with invalid TerminalID length (%d) from %s", len(packet.TerminalID), conn.RemoteAddr())
+		return ""
+	}
+
+	potentialIMEI := packet.TerminalID[:16]
+
+	// Validate device registration
+	if !s.isDeviceRegistered(potentialIMEI) {
+		colors.PrintError("Unauthorized device: %s", potentialIMEI)
+		conn.Close()
+		return ""
+	}
+
+	colors.PrintSuccess("Authorized device login: %s", potentialIMEI)
+	s.controlController.RegisterConnection(potentialIMEI, conn)
+
+	// Get vehicle info for WebSocket broadcast
+	var vehicle models.Vehicle
+	vehicleReg := ""
+	if err := db.GetDB().Where("imei = ?", potentialIMEI).First(&vehicle).Error; err == nil {
+		vehicleReg = vehicle.RegNo
+	}
+
+	// Broadcast device connection to WebSocket clients
+	if http.WSHub != nil {
+		http.WSHub.BroadcastDeviceStatus(potentialIMEI, "connected", vehicleReg)
+	}
+
+	return potentialIMEI
 }
 
 // handleGPSPacket processes GPS data packets
@@ -230,13 +243,27 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 	colors.PrintData("📊", "Status info from %s: Ignition=%s, Voltage=%v, GSM Signal=%v",
 		conn.RemoteAddr(), packet.Ignition, packet.Voltage, packet.GSMSignal)
 
-	// Save status data to database
+	// Save status data to database and broadcast to WebSocket clients
 	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
 		statusData := s.buildStatusData(packet, deviceIMEI)
 		if err := db.GetDB().Create(&statusData).Error; err != nil {
 			colors.PrintError("Error saving status data: %v", err)
 		} else {
 			colors.PrintSuccess("Status data saved for device %s", deviceIMEI)
+
+			// Get vehicle information for WebSocket broadcast
+			var vehicle models.Vehicle
+			vehicleName := ""
+			regNo := ""
+			if err := db.GetDB().Where("imei = ?", deviceIMEI).First(&vehicle).Error; err == nil {
+				vehicleName = vehicle.Name
+				regNo = vehicle.RegNo
+			}
+
+			// Broadcast status update as GPS update to WebSocket clients
+			if http.WSHub != nil {
+				http.WSHub.BroadcastGPSUpdate(&statusData, vehicleName, regNo)
+			}
 		}
 	}
 }
