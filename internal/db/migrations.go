@@ -23,6 +23,12 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
+	// Add token columns to users table if they don't exist
+	if err := addTokenColumnsToUsers(db); err != nil {
+		colors.PrintError("Failed to add token columns: %v", err)
+		return err
+	}
+
 	// Fix the foreign key constraint between vehicles and devices
 	if err := fixVehicleDeviceConstraint(db); err != nil {
 		colors.PrintError("Failed to fix vehicle-device constraint: %v", err)
@@ -52,6 +58,92 @@ func updateImageColumnToText(db *gorm.DB) error {
 		colors.PrintSuccess("Successfully updated users.image column to TEXT type")
 	} else {
 		colors.PrintInfo("users.image column is already TEXT type, no update needed")
+	}
+
+	return nil
+}
+
+// addTokenColumnsToUsers adds token and token_exp columns to users table if they don't exist
+func addTokenColumnsToUsers(db *gorm.DB) error {
+	colors.PrintInfo("Checking for token columns in users table...")
+
+	// Check if token column exists
+	var tokenColumnExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.columns 
+		WHERE table_name = 'users' 
+		AND column_name = 'token'
+	`).Count(&tokenColumnExists)
+
+	if tokenColumnExists == 0 {
+		colors.PrintInfo("Adding token column to users table...")
+		if err := db.Exec("ALTER TABLE users ADD COLUMN token VARCHAR(255)").Error; err != nil {
+			return err
+		}
+		colors.PrintSuccess("Added token column to users table")
+	} else {
+		colors.PrintInfo("Token column already exists in users table")
+	}
+
+	// Check if token_exp column exists
+	var tokenExpColumnExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.columns 
+		WHERE table_name = 'users' 
+		AND column_name = 'token_exp'
+	`).Count(&tokenExpColumnExists)
+
+	if tokenExpColumnExists == 0 {
+		colors.PrintInfo("Adding token_exp column to users table...")
+		if err := db.Exec("ALTER TABLE users ADD COLUMN token_exp TIMESTAMP").Error; err != nil {
+			return err
+		}
+		colors.PrintSuccess("Added token_exp column to users table")
+	} else {
+		colors.PrintInfo("Token_exp column already exists in users table")
+	}
+
+	// Add unique index on token column if it doesn't exist
+	var tokenIndexExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM pg_indexes 
+		WHERE tablename = 'users' 
+		AND indexname LIKE '%token%'
+	`).Count(&tokenIndexExists)
+
+	if tokenIndexExists == 0 {
+		colors.PrintInfo("Creating unique index on token column...")
+		if err := db.Exec("CREATE UNIQUE INDEX idx_users_token ON users(token) WHERE token IS NOT NULL").Error; err != nil {
+			// Index might already exist with a different name, log warning but continue
+			colors.PrintWarning("Could not create token index (might already exist): %v", err)
+		} else {
+			colors.PrintSuccess("Created unique index on token column")
+		}
+	} else {
+		colors.PrintInfo("Token index already exists")
+	}
+
+	// Add index on token_exp column if it doesn't exist
+	var tokenExpIndexExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM pg_indexes 
+		WHERE tablename = 'users' 
+		AND indexname LIKE '%token_exp%'
+	`).Count(&tokenExpIndexExists)
+
+	if tokenExpIndexExists == 0 {
+		colors.PrintInfo("Creating index on token_exp column...")
+		if err := db.Exec("CREATE INDEX idx_users_token_exp ON users(token_exp)").Error; err != nil {
+			colors.PrintWarning("Could not create token_exp index (might already exist): %v", err)
+		} else {
+			colors.PrintSuccess("Created index on token_exp column")
+		}
+	} else {
+		colors.PrintInfo("Token_exp index already exists")
 	}
 
 	return nil
