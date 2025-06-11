@@ -7,6 +7,7 @@ import (
 	"luna_iot_server/pkg/colors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -57,6 +58,18 @@ type GPSUpdate struct {
 	Signal       *SignalInfo  `json:"signal,omitempty"`
 	DeviceStatus *DeviceInfo  `json:"device_status,omitempty"`
 	AlarmStatus  *AlarmInfo   `json:"alarm_status,omitempty"`
+
+	// Additional fields for better tracking
+	IsMoving         bool   `json:"is_moving"`
+	LastSeen         string `json:"last_seen"`
+	ConnectionStatus string `json:"connection_status"` // "connected", "disconnected", "timeout"
+
+	// Map rotation support
+	Bearing *float64 `json:"bearing,omitempty"` // Course converted to bearing (0-360)
+
+	// Enhanced location validation
+	LocationValid bool `json:"location_valid"`
+	Accuracy      *int `json:"accuracy,omitempty"`
 }
 
 // DeviceStatus represents device connection status
@@ -155,13 +168,27 @@ func (h *WebSocketHub) Run() {
 	}
 }
 
-// BroadcastGPSUpdate sends GPS data to all connected clients
+// BroadcastGPSUpdate sends GPS data updates to all connected clients
 func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
 	// Get vehicle type information
 	var vehicle models.Vehicle
 	vehicleType := ""
 	if err := db.GetDB().Where("imei = ?", gpsData.IMEI).First(&vehicle).Error; err == nil {
 		vehicleType = string(vehicle.VehicleType)
+	}
+
+	// Validate GPS coordinates
+	locationValid := false
+	if gpsData.Latitude != nil && gpsData.Longitude != nil {
+		lat := *gpsData.Latitude
+		lng := *gpsData.Longitude
+		locationValid = lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat != 0 && lng != 0
+	}
+
+	// Determine if vehicle is moving based on speed
+	isMoving := false
+	if gpsData.Speed != nil && *gpsData.Speed > 0 {
+		isMoving = true
 	}
 
 	// Build battery information
@@ -186,7 +213,7 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		}
 	}
 
-	// Build device status information
+	// Build device status information with improved ignition logic
 	deviceStatus := &DeviceInfo{
 		Activated:     gpsData.DeviceStatus == "ACTIVATED",
 		GPSTracking:   gpsData.GPSTracking == "ENABLED",
@@ -213,6 +240,26 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		}
 	}
 
+	// Convert course to bearing for map rotation (0-360 degrees)
+	var bearing *float64
+	if gpsData.Course != nil {
+		bearingValue := float64(*gpsData.Course)
+		// Ensure bearing is in 0-360 range
+		if bearingValue < 0 {
+			bearingValue += 360
+		}
+		if bearingValue >= 360 {
+			bearingValue = bearingValue - 360*float64(int(bearingValue/360))
+		}
+		bearing = &bearingValue
+	}
+
+	// Determine connection status
+	connectionStatus := "connected"
+	if gpsData.Timestamp.Before(time.Now().Add(-1 * time.Hour)) {
+		connectionStatus = "timeout"
+	}
+
 	update := GPSUpdate{
 		IMEI:         gpsData.IMEI,
 		VehicleName:  vehicleName,
@@ -229,6 +276,13 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		Signal:       signal,
 		DeviceStatus: deviceStatus,
 		AlarmStatus:  alarmStatus,
+
+		// Enhanced fields
+		IsMoving:         isMoving,
+		LastSeen:         gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
+		ConnectionStatus: connectionStatus,
+		Bearing:          bearing,
+		LocationValid:    locationValid,
 	}
 
 	message := WebSocketMessage{
@@ -239,30 +293,70 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 
 	if data, err := json.Marshal(message); err == nil {
 		h.broadcast <- data
-		colors.PrintData("📡", "Broadcasted enhanced GPS update for IMEI %s to %d clients", gpsData.IMEI, len(h.clients))
+		colors.PrintData("📡", "Broadcasted enhanced GPS update for IMEI %s to %d clients (Valid: %v, Moving: %v)",
+			gpsData.IMEI, len(h.clients), locationValid, isMoving)
 	} else {
 		colors.PrintError("Error marshaling GPS update: %v", err)
 	}
 }
 
-// BroadcastDeviceStatus sends device status updates
+// BroadcastDeviceStatus sends device status updates with enhanced information
 func (h *WebSocketHub) BroadcastDeviceStatus(imei, status, vehicleReg string) {
+	// Get vehicle information
+	var vehicle models.Vehicle
+	vehicleName := ""
+	vehicleType := ""
+	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err == nil {
+		vehicleName = vehicle.Name
+		vehicleType = string(vehicle.VehicleType)
+		if vehicleReg == "" {
+			vehicleReg = vehicle.RegNo
+		}
+	}
+
+	// Get latest GPS data for additional context
+	var latestGPS models.GPSData
+	var battery *BatteryInfo
+	var signal *SignalInfo
+	if err := db.GetDB().Where("imei = ?", imei).Order("timestamp DESC").First(&latestGPS).Error; err == nil {
+		if latestGPS.VoltageLevel != nil {
+			battery = &BatteryInfo{
+				Level:    getVoltagePercentage(*latestGPS.VoltageLevel),
+				Voltage:  *latestGPS.VoltageLevel,
+				Status:   latestGPS.VoltageStatus,
+				Charging: latestGPS.Charger == "CONNECTED",
+			}
+		}
+		if latestGPS.GSMSignal != nil {
+			signal = &SignalInfo{
+				Level:      *latestGPS.GSMSignal,
+				Bars:       getSignalBars(*latestGPS.GSMSignal),
+				Status:     latestGPS.GSMStatus,
+				Percentage: getSignalPercentage(*latestGPS.GSMSignal),
+			}
+		}
+	}
+
 	statusUpdate := DeviceStatus{
-		IMEI:       imei,
-		Status:     status,
-		LastSeen:   "", // Will be set by caller
-		VehicleReg: vehicleReg,
+		IMEI:        imei,
+		Status:      status,
+		LastSeen:    time.Now().Format("2006-01-02T15:04:05Z"),
+		VehicleReg:  vehicleReg,
+		VehicleName: vehicleName,
+		VehicleType: vehicleType,
+		Battery:     battery,
+		Signal:      signal,
 	}
 
 	message := WebSocketMessage{
 		Type:      "device_status",
-		Timestamp: "", // Will be set by caller
+		Timestamp: time.Now().Format("2006-01-02T15:04:05Z"),
 		Data:      statusUpdate,
 	}
 
 	if data, err := json.Marshal(message); err == nil {
 		h.broadcast <- data
-		colors.PrintConnection("📡", "Broadcasted device status for IMEI %s: %s", imei, status)
+		colors.PrintConnection("📡", "Broadcasted device status for IMEI %s: %s (%s)", imei, status, vehicleName)
 	}
 }
 
