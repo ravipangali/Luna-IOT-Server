@@ -62,7 +62,7 @@ type GPSUpdate struct {
 	// Additional fields for better tracking
 	IsMoving         bool   `json:"is_moving"`
 	LastSeen         string `json:"last_seen"`
-	ConnectionStatus string `json:"connection_status"` // "connected", "disconnected", "timeout"
+	ConnectionStatus string `json:"connection_status"` // "connected", "stopped", "inactive"
 
 	// Map rotation support
 	Bearing *float64 `json:"bearing,omitempty"` // Course converted to bearing (0-360)
@@ -75,7 +75,7 @@ type GPSUpdate struct {
 // DeviceStatus represents device connection status
 type DeviceStatus struct {
 	IMEI        string       `json:"imei"`
-	Status      string       `json:"status"` // "connected", "disconnected"
+	Status      string       `json:"status"` // "connected", "stopped", "inactive"
 	LastSeen    string       `json:"last_seen"`
 	VehicleReg  string       `json:"vehicle_reg,omitempty"`
 	VehicleName string       `json:"vehicle_name,omitempty"`
