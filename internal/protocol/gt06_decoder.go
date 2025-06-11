@@ -315,175 +315,175 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 		}
 	}
 
-	if result.Protocol == 0xA0 {
-		if offset < len(data) {
-			offset += 1
+	// if result.Protocol == 0xA0 {
+	if offset < len(data) {
+		offset += 1
 
-			if offset+12 <= len(data) {
-				latRaw := binary.BigEndian.Uint32(data[offset : offset+4])
-				if latRaw > 0 && latRaw < 0xFFFFFFFF {
-					lat := float64(latRaw) / 1800000.0
-					result.Latitude = &lat
-				}
-				offset += 4
+		if offset+12 <= len(data) {
+			latRaw := binary.BigEndian.Uint32(data[offset : offset+4])
+			if latRaw > 0 && latRaw < 0xFFFFFFFF {
+				lat := float64(latRaw) / 1800000.0
+				result.Latitude = &lat
+			}
+			offset += 4
 
-				lngRaw := binary.BigEndian.Uint32(data[offset : offset+4])
-				if lngRaw > 0 && lngRaw < 0xFFFFFFFF {
-					lng := float64(lngRaw) / 1800000.0
+			lngRaw := binary.BigEndian.Uint32(data[offset : offset+4])
+			if lngRaw > 0 && lngRaw < 0xFFFFFFFF {
+				lng := float64(lngRaw) / 1800000.0
+				result.Longitude = &lng
+			}
+			offset += 4
+
+			if offset+3 <= len(data) {
+				speed := data[offset]
+				result.Speed = &speed
+
+				courseStatus := binary.BigEndian.Uint16(data[offset+1 : offset+3])
+				course := courseStatus & 0x03FF
+				result.Course = &course
+
+				// Status flags
+				gpsRealTime := (courseStatus & 0x2000) == 0
+				result.GPSRealTime = &gpsRealTime
+
+				gpsPositioned := (courseStatus & 0x1000) == 0
+				result.GPSPositioned = &gpsPositioned
+
+				eastLongitude := (courseStatus & 0x0800) == 0
+				result.EastLongitude = &eastLongitude
+
+				northLatitude := (courseStatus & 0x0400) == 0
+				result.NorthLatitude = &northLatitude
+
+				// Adjust coordinates based on hemisphere flags
+				if result.Longitude != nil && !*result.EastLongitude {
+					lng := -*result.Longitude
 					result.Longitude = &lng
 				}
-				offset += 4
-
-				if offset+3 <= len(data) {
-					speed := data[offset]
-					result.Speed = &speed
-
-					courseStatus := binary.BigEndian.Uint16(data[offset+1 : offset+3])
-					course := courseStatus & 0x03FF
-					result.Course = &course
-
-					// Status flags
-					gpsRealTime := (courseStatus & 0x2000) == 0
-					result.GPSRealTime = &gpsRealTime
-
-					gpsPositioned := (courseStatus & 0x1000) == 0
-					result.GPSPositioned = &gpsPositioned
-
-					eastLongitude := (courseStatus & 0x0800) == 0
-					result.EastLongitude = &eastLongitude
-
-					northLatitude := (courseStatus & 0x0400) == 0
-					result.NorthLatitude = &northLatitude
-
-					// Adjust coordinates based on hemisphere flags
-					if result.Longitude != nil && !*result.EastLongitude {
-						lng := -*result.Longitude
-						result.Longitude = &lng
-					}
-					if result.Latitude != nil && !*result.NorthLatitude {
-						lat := -*result.Latitude
-						result.Latitude = &lat
-					}
-
-					offset += 3
+				if result.Latitude != nil && !*result.NorthLatitude {
+					lat := -*result.Latitude
+					result.Latitude = &lat
 				}
-			}
 
-			// Decode cell tower information
-			for offset+9 <= len(data) {
-				testMCC := binary.BigEndian.Uint16(data[offset : offset+2])
-
-				if testMCC >= 100 && testMCC <= 999 {
-					result.MCC = &testMCC
-					mnc := data[offset+2]
-					result.MNC = &mnc
-					lac := binary.BigEndian.Uint16(data[offset+3 : offset+5])
-					result.LAC = &lac
-
-					cellId1 := data[offset+5]
-					cellId2 := data[offset+6]
-					cellId3 := data[offset+7]
-					cellId := (uint32(cellId1) << 16) | (uint32(cellId2) << 8) | uint32(cellId3)
-					result.CellID = &cellId
-
-					offset += 8
-					break
-				}
-				offset += 1
+				offset += 3
 			}
 		}
-	} else {
-		if offset < len(data) {
-			gpsInfoLength := data[offset]
+
+		// Decode cell tower information
+		for offset+9 <= len(data) {
+			testMCC := binary.BigEndian.Uint16(data[offset : offset+2])
+
+			if testMCC >= 100 && testMCC <= 999 {
+				result.MCC = &testMCC
+				mnc := data[offset+2]
+				result.MNC = &mnc
+				lac := binary.BigEndian.Uint16(data[offset+3 : offset+5])
+				result.LAC = &lac
+
+				cellId1 := data[offset+5]
+				cellId2 := data[offset+6]
+				cellId3 := data[offset+7]
+				cellId := (uint32(cellId1) << 16) | (uint32(cellId2) << 8) | uint32(cellId3)
+				result.CellID = &cellId
+
+				offset += 8
+				break
+			}
 			offset += 1
-
-			if gpsInfoLength > 0 && gpsInfoLength <= 50 && offset+int(gpsInfoLength) <= len(data) {
-				if offset+4 <= len(data) {
-					satellites := (data[offset] >> 4) & 0x0F
-					result.Satellites = &satellites
-
-					lat1 := data[offset] & 0x0F
-					lat2 := data[offset+1]
-					lat3 := data[offset+2]
-					lat4 := data[offset+3]
-
-					latRaw := (uint32(lat1) << 24) | (uint32(lat2) << 16) | (uint32(lat3) << 8) | uint32(lat4)
-
-					if latRaw > 0 {
-						lat := float64(latRaw) / 1800000.0
-						result.Latitude = &lat
-					}
-					offset += 4
-				}
-
-				if offset+4 <= len(data) {
-					lngRaw := binary.BigEndian.Uint32(data[offset : offset+4])
-
-					if lngRaw > 0 {
-						lng := float64(lngRaw) / 1800000.0
-						result.Longitude = &lng
-					}
-					offset += 4
-				}
-
-				if offset < len(data) {
-					speed := data[offset]
-					result.Speed = &speed
-					offset += 1
-				}
-
-				if offset+2 <= len(data) {
-					courseStatus := binary.BigEndian.Uint16(data[offset : offset+2])
-
-					course := courseStatus & 0x03FF
-					result.Course = &course
-
-					gpsRealTime := (courseStatus & 0x2000) == 0
-					result.GPSRealTime = &gpsRealTime
-
-					gpsPositioned := (courseStatus & 0x1000) == 0
-					result.GPSPositioned = &gpsPositioned
-
-					eastLongitude := (courseStatus & 0x0800) == 0
-					result.EastLongitude = &eastLongitude
-
-					northLatitude := (courseStatus & 0x0400) == 0
-					result.NorthLatitude = &northLatitude
-
-					offset += 2
-
-					// Adjust coordinates
-					if result.Longitude != nil && !*result.EastLongitude {
-						lng := -*result.Longitude
-						result.Longitude = &lng
-					}
-					if result.Latitude != nil && !*result.NorthLatitude {
-						lat := -*result.Latitude
-						result.Latitude = &lat
-					}
-				}
-			}
-		}
-
-		if offset+9 <= len(data) {
-			mcc := binary.BigEndian.Uint16(data[offset : offset+2])
-			result.MCC = &mcc
-
-			mnc := data[offset+2]
-			result.MNC = &mnc
-
-			lac := binary.BigEndian.Uint16(data[offset+3 : offset+5])
-			result.LAC = &lac
-
-			cellId1 := data[offset+5]
-			cellId2 := data[offset+6]
-			cellId3 := data[offset+7]
-			cellId := (uint32(cellId1) << 16) | (uint32(cellId2) << 8) | uint32(cellId3)
-			result.CellID = &cellId
-
-			offset += 8
 		}
 	}
+	// } else {
+	// 	if offset < len(data) {
+	// 		gpsInfoLength := data[offset]
+	// 		offset += 1
+
+	// 		if gpsInfoLength > 0 && gpsInfoLength <= 50 && offset+int(gpsInfoLength) <= len(data) {
+	// 			if offset+4 <= len(data) {
+	// 				satellites := (data[offset] >> 4) & 0x0F
+	// 				result.Satellites = &satellites
+
+	// 				lat1 := data[offset] & 0x0F
+	// 				lat2 := data[offset+1]
+	// 				lat3 := data[offset+2]
+	// 				lat4 := data[offset+3]
+
+	// 				latRaw := (uint32(lat1) << 24) | (uint32(lat2) << 16) | (uint32(lat3) << 8) | uint32(lat4)
+
+	// 				if latRaw > 0 {
+	// 					lat := float64(latRaw) / 1800000.0
+	// 					result.Latitude = &lat
+	// 				}
+	// 				offset += 4
+	// 			}
+
+	// 			if offset+4 <= len(data) {
+	// 				lngRaw := binary.BigEndian.Uint32(data[offset : offset+4])
+
+	// 				if lngRaw > 0 {
+	// 					lng := float64(lngRaw) / 1800000.0
+	// 					result.Longitude = &lng
+	// 				}
+	// 				offset += 4
+	// 			}
+
+	// 			if offset < len(data) {
+	// 				speed := data[offset]
+	// 				result.Speed = &speed
+	// 				offset += 1
+	// 			}
+
+	// 			if offset+2 <= len(data) {
+	// 				courseStatus := binary.BigEndian.Uint16(data[offset : offset+2])
+
+	// 				course := courseStatus & 0x03FF
+	// 				result.Course = &course
+
+	// 				gpsRealTime := (courseStatus & 0x2000) == 0
+	// 				result.GPSRealTime = &gpsRealTime
+
+	// 				gpsPositioned := (courseStatus & 0x1000) == 0
+	// 				result.GPSPositioned = &gpsPositioned
+
+	// 				eastLongitude := (courseStatus & 0x0800) == 0
+	// 				result.EastLongitude = &eastLongitude
+
+	// 				northLatitude := (courseStatus & 0x0400) == 0
+	// 				result.NorthLatitude = &northLatitude
+
+	// 				offset += 2
+
+	// 				// Adjust coordinates
+	// 				if result.Longitude != nil && !*result.EastLongitude {
+	// 					lng := -*result.Longitude
+	// 					result.Longitude = &lng
+	// 				}
+	// 				if result.Latitude != nil && !*result.NorthLatitude {
+	// 					lat := -*result.Latitude
+	// 					result.Latitude = &lat
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+
+	// 	if offset+9 <= len(data) {
+	// 		mcc := binary.BigEndian.Uint16(data[offset : offset+2])
+	// 		result.MCC = &mcc
+
+	// 		mnc := data[offset+2]
+	// 		result.MNC = &mnc
+
+	// 		lac := binary.BigEndian.Uint16(data[offset+3 : offset+5])
+	// 		result.LAC = &lac
+
+	// 		cellId1 := data[offset+5]
+	// 		cellId2 := data[offset+6]
+	// 		cellId3 := data[offset+7]
+	// 		cellId := (uint32(cellId1) << 16) | (uint32(cellId2) << 8) | uint32(cellId3)
+	// 		result.CellID = &cellId
+
+	// 		offset += 8
+	// 	}
+	// }
 
 	if len(data) > offset {
 		result.AdditionalData = strings.ToUpper(hex.EncodeToString(data[offset:]))
