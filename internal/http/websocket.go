@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
@@ -49,6 +50,7 @@ type GPSUpdate struct {
 	Longitude    *float64 `json:"longitude"`
 	Speed        *int     `json:"speed"`
 	Course       *int     `json:"course"`
+	Altitude     *int     `json:"altitude"` // meters above sea level
 	Ignition     string   `json:"ignition"`
 	Timestamp    string   `json:"timestamp"`
 	ProtocolName string   `json:"protocol_name"`
@@ -269,6 +271,7 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		Longitude:    gpsData.Longitude,
 		Speed:        gpsData.Speed,
 		Course:       gpsData.Course,
+		Altitude:     gpsData.Altitude,
 		Ignition:     gpsData.Ignition,
 		Timestamp:    gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
 		ProtocolName: gpsData.ProtocolName,
@@ -293,8 +296,14 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 
 	if data, err := json.Marshal(message); err == nil {
 		h.broadcast <- data
-		colors.PrintData("📡", "Broadcasted enhanced GPS update for IMEI %s to %d clients (Valid: %v, Moving: %v)",
-			gpsData.IMEI, len(h.clients), locationValid, isMoving)
+		latStr := "N/A"
+		lngStr := "N/A"
+		if gpsData.Latitude != nil && gpsData.Longitude != nil {
+			latStr = fmt.Sprintf("%.12f", *gpsData.Latitude)
+			lngStr = fmt.Sprintf("%.12f", *gpsData.Longitude)
+		}
+		colors.PrintData("📡", "Broadcasted enhanced GPS update for IMEI %s to %d clients (Lat: %s, Lng: %s, Valid: %v, Moving: %v)",
+			gpsData.IMEI, len(h.clients), latStr, lngStr, locationValid, isMoving)
 	} else {
 		colors.PrintError("Error marshaling GPS update: %v", err)
 	}

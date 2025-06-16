@@ -251,10 +251,10 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 		if lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 &&
 			lat != 0 && lng != 0 { // Exclude null island (0,0)
 			hasValidGPS = true
-			colors.PrintData("📍", "Valid GPS Location: Lat=%.6f, Lng=%.6f, Speed=%v km/h",
+			colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%v km/h",
 				lat, lng, packet.Speed)
 		} else {
-			colors.PrintWarning("📍 Invalid GPS coordinates: Lat=%.6f, Lng=%.6f", lat, lng)
+			colors.PrintWarning("📍 Invalid GPS coordinates: Lat=%.12f, Lng=%.12f", lat, lng)
 		}
 	}
 
@@ -367,7 +367,7 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 		RawPacket:    packet.Raw,
 	}
 
-	// GPS location data
+	// GPS location data with enhanced precision
 	if packet.Latitude != nil {
 		gpsData.Latitude = packet.Latitude
 	}
@@ -381,6 +381,9 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 	if packet.Course != nil {
 		course := int(*packet.Course)
 		gpsData.Course = &course
+	}
+	if packet.Altitude != nil {
+		gpsData.Altitude = packet.Altitude
 	}
 	if packet.Satellites != nil {
 		satellites := int(*packet.Satellites)
@@ -402,7 +405,7 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 	gpsData.OilElectricity = packet.OilElectricity
 	gpsData.DeviceStatus = packet.DeviceStatus
 
-	// LBS data
+	// LBS data (cell tower information)
 	if packet.MCC != nil {
 		mcc := int(*packet.MCC)
 		gpsData.MCC = &mcc
@@ -410,6 +413,14 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 	if packet.MNC != nil {
 		mnc := int(*packet.MNC)
 		gpsData.MNC = &mnc
+	}
+	if packet.LAC != nil {
+		lac := int(*packet.LAC)
+		gpsData.LAC = &lac
+	}
+	if packet.CellID != nil {
+		cellID := int(*packet.CellID)
+		gpsData.CellID = &cellID
 	}
 
 	return gpsData

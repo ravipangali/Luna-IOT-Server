@@ -44,6 +44,7 @@ type DecodedPacket struct {
 	Longitude     *float64   `json:"longitude,omitempty"`
 	Speed         *byte      `json:"speed,omitempty"`
 	Course        *uint16    `json:"course,omitempty"`
+	Altitude      *int       `json:"altitude,omitempty"`
 	GPSRealTime   *bool      `json:"gpsRealTime,omitempty"`
 	GPSPositioned *bool      `json:"gpsPositioned,omitempty"`
 	EastLongitude *bool      `json:"eastLongitude,omitempty"`
@@ -317,6 +318,12 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 
 	// if result.Protocol == 0xA0 {
 	if offset < len(data) {
+		// Parse satellites count from first byte (upper 4 bits)
+		if offset < len(data) {
+			satellitesByte := data[offset]
+			satellites := (satellitesByte >> 4) & 0x0F
+			result.Satellites = &satellites
+		}
 		offset += 1
 
 		if offset+12 <= len(data) {
@@ -367,6 +374,16 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 
 				offset += 3
 			}
+		}
+
+		// Parse altitude if available (after GPS data)
+		if offset+2 <= len(data) {
+			altitudeRaw := binary.BigEndian.Uint16(data[offset : offset+2])
+			if altitudeRaw > 0 && altitudeRaw < 0xFFFF {
+				altitude := int(altitudeRaw)
+				result.Altitude = &altitude
+			}
+			offset += 2
 		}
 
 		// Decode cell tower information

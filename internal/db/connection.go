@@ -121,6 +121,12 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ Vehicle-device relationship fixed")
 
+	// Update latitude and longitude precision
+	if err := updateLatLongPrecision(DB); err != nil {
+		return fmt.Errorf("failed to update GPS precision: %v", err)
+	}
+	colors.PrintSuccess("✓ GPS coordinate precision enhanced")
+
 	colors.PrintHeader("DATABASE MIGRATIONS COMPLETED SUCCESSFULLY")
 	return nil
 }
