@@ -410,54 +410,41 @@ func InitializeWebSocket() {
 
 // Helper functions for status calculations
 
-// getVoltagePercentage converts voltage level to percentage
+// getVoltagePercentage converts voltage level (0-6) to percentage (0-100)
 func getVoltagePercentage(level int) int {
-	// Voltage levels typically range from 0-255 or 0-100 depending on device
-	// This is a simplified calculation - adjust based on your device specifications
-	if level >= 100 {
-		return 100
-	}
+	// Voltage levels range from 0-6, convert to 0-100 percentage
 	if level <= 0 {
 		return 0
 	}
-
-	// Assume level is 0-100 range, or convert from 0-255 range
-	if level > 100 {
-		return (level * 100) / 255
+	if level >= 6 {
+		return 100
 	}
-	return level
+	// Convert 0-6 to 0-100 percentage
+	return (level * 100) / 6
 }
 
-// getSignalBars converts GSM signal level to bars (0-5)
+// getSignalBars converts GSM signal level (0-4) to bars (0-5)
 func getSignalBars(level int) int {
-	// Convert signal level to bars (0-5)
-	if level >= 80 {
-		return 5
-	} else if level >= 60 {
-		return 4
-	} else if level >= 40 {
-		return 3
-	} else if level >= 20 {
-		return 2
-	} else if level > 0 {
-		return 1
-	}
-	return 0
-}
-
-// getSignalPercentage converts GSM signal level to percentage
-func getSignalPercentage(level int) int {
-	// Assume signal level is 0-100 range, or convert from other ranges
-	if level >= 100 {
-		return 100
-	}
+	// Convert signal level (0-4) to bars (0-5)
 	if level <= 0 {
 		return 0
 	}
-
-	// If level is in 0-255 range, convert to percentage
-	if level > 100 {
-		return (level * 100) / 255
+	if level >= 4 {
+		return 5
 	}
-	return level
+	// Convert 0-4 to 1-5 bars (level 1 = 1 bar, level 4 = 5 bars)
+	return level + 1
+}
+
+// getSignalPercentage converts GSM signal level (0-4) to percentage (0-100)
+func getSignalPercentage(level int) int {
+	// Signal levels range from 0-4, convert to 0-100 percentage
+	if level <= 0 {
+		return 0
+	}
+	if level >= 4 {
+		return 100
+	}
+	// Convert 0-4 to 0-100 percentage
+	return (level * 100) / 4
 }
