@@ -497,7 +497,7 @@ func (s *Server) monitorDeviceTimeouts() {
 	}
 }
 
-// checkDevicesForInactiveStatus checks all devices and marks them inactive if no GPS data for over 1 hour
+// checkDevicesForInactiveStatus checks all devices and marks them stopped/inactive based on data age
 func (s *Server) checkDevicesForInactiveStatus() {
 	var devices []models.Device
 	if err := db.GetDB().Find(&devices).Error; err != nil {
@@ -507,6 +507,7 @@ func (s *Server) checkDevicesForInactiveStatus() {
 
 	now := time.Now()
 	oneHourAgo := now.Add(-time.Hour)
+	twoHoursAgo := now.Add(-2 * time.Hour)
 
 	for _, device := range devices {
 		// Get latest GPS data for this device
@@ -516,22 +517,46 @@ func (s *Server) checkDevicesForInactiveStatus() {
 			First(&latestGPS).Error
 
 		if err != nil {
-			// No GPS data found, consider inactive
-			colors.PrintWarning("📱 Device %s has no GPS data, marking as inactive", device.IMEI)
+			// No GPS data found at all - only mark as inactive if device exists in database
+			// This means device is registered but never sent any data
+			colors.PrintWarning("📱 Device %s has no GPS data in database, marking as inactive", device.IMEI)
 			s.broadcastInactiveStatus(device.IMEI)
 			continue
 		}
 
-		// Check if latest GPS data is older than 1 hour
-		if latestGPS.Timestamp.Before(oneHourAgo) {
+		// Device has GPS data, check age to determine status
+		if latestGPS.Timestamp.Before(twoHoursAgo) {
+			// Data is older than 2 hours - mark as inactive
 			colors.PrintWarning("📱 Device %s last GPS data is %v old, marking as inactive",
 				device.IMEI, now.Sub(latestGPS.Timestamp))
 			s.broadcastInactiveStatus(device.IMEI)
+		} else if latestGPS.Timestamp.Before(oneHourAgo) {
+			// Data is between 1-2 hours old - mark as stopped
+			colors.PrintWarning("📱 Device %s last GPS data is %v old, marking as stopped",
+				device.IMEI, now.Sub(latestGPS.Timestamp))
+			s.broadcastStoppedStatus(device.IMEI)
 		}
+		// If data is less than 1 hour old, device should already be showing as connected
+		// through normal GPS updates, so no action needed here
 	}
 }
 
-// broadcastInactiveStatus broadcasts inactive status for a device
+// broadcastStoppedStatus broadcasts stopped status for a device (1-2 hours without data)
+func (s *Server) broadcastStoppedStatus(imei string) {
+	// Get vehicle info for WebSocket broadcast
+	var vehicle models.Vehicle
+	vehicleReg := ""
+	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err == nil {
+		vehicleReg = vehicle.RegNo
+	}
+
+	// Broadcast device as stopped
+	if http.WSHub != nil {
+		http.WSHub.BroadcastDeviceStatus(imei, "stopped", vehicleReg)
+	}
+}
+
+// broadcastInactiveStatus broadcasts inactive status for a device (2+ hours without data)
 func (s *Server) broadcastInactiveStatus(imei string) {
 	// Get vehicle info for WebSocket broadcast
 	var vehicle models.Vehicle
