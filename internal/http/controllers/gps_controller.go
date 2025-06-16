@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -109,11 +110,12 @@ func (gc *GPSController) GetGPSDataByIMEI(c *gin.Context) {
 	})
 }
 
-// GetLatestGPSData returns the latest GPS data for each device
+// GetLatestGPSData returns the latest GPS data for each device with location fallback
 func (gc *GPSController) GetLatestGPSData(c *gin.Context) {
 	var gpsData []models.GPSData
 
-	// Get latest GPS data for each IMEI
+	// Get latest GPS data for each IMEI - this is for status determination
+	// Always get the very latest GPS data regardless of device connection status
 	if err := db.GetDB().Raw(`
 		SELECT DISTINCT ON (imei) *
 		FROM gps_data
@@ -126,14 +128,65 @@ func (gc *GPSController) GetLatestGPSData(c *gin.Context) {
 		return
 	}
 
+	// For each GPS data entry, if coordinates are null, try to get last valid location
+	// This ensures map markers can be positioned even when latest data has null coordinates
+	for i, data := range gpsData {
+		if data.Latitude == nil || data.Longitude == nil {
+			// Find last GPS data with valid coordinates for this IMEI for map positioning
+			var validGPS models.GPSData
+			if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", data.IMEI).
+				Order("timestamp DESC").
+				First(&validGPS).Error; err == nil {
+				// Use coordinates from last valid location for map positioning
+				// But keep the original timestamp for status determination
+				gpsData[i].Latitude = validGPS.Latitude
+				gpsData[i].Longitude = validGPS.Longitude
+				// Add a note about the location fallback
+				gpsData[i].RawPacket = fmt.Sprintf("Location from %s, status from %s",
+					validGPS.Timestamp.Format("2006-01-02T15:04:05Z"),
+					data.Timestamp.Format("2006-01-02T15:04:05Z"))
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data":    gpsData,
 		"count":   len(gpsData),
-		"message": "Latest GPS data retrieved successfully",
+		"message": "Latest GPS data retrieved successfully - status based on latest data, location with fallback",
 	})
 }
 
-// GetLatestGPSDataByIMEI returns the latest GPS data for a specific device
+// GetLatestValidGPSDataByIMEI returns the latest GPS data with valid coordinates for a specific device
+func (gc *GPSController) GetLatestValidGPSDataByIMEI(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid IMEI format",
+		})
+		return
+	}
+
+	var gpsData models.GPSData
+
+	// First try to get the latest GPS data with valid coordinates
+	if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL").
+		Preload("Device").
+		Preload("Vehicle").
+		Order("timestamp DESC").
+		First(&gpsData).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "No GPS data with valid coordinates found for this device",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":    gpsData,
+		"message": "Latest valid GPS data retrieved successfully",
+	})
+}
+
+// GetLatestGPSDataByIMEI returns the latest GPS data for a specific device (including null coordinates)
 func (gc *GPSController) GetLatestGPSDataByIMEI(c *gin.Context) {
 	imei := c.Param("imei")
 	if len(imei) != 16 {

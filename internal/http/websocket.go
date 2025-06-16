@@ -172,11 +172,13 @@ func (h *WebSocketHub) Run() {
 
 // BroadcastGPSUpdate sends GPS data updates to all connected clients
 func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
-	// Get vehicle type information
+	// Get vehicle information for overspeed checking
 	var vehicle models.Vehicle
 	vehicleType := ""
+	overspeedLimit := 60 // Default overspeed limit
 	if err := db.GetDB().Where("imei = ?", gpsData.IMEI).First(&vehicle).Error; err == nil {
 		vehicleType = string(vehicle.VehicleType)
+		overspeedLimit = vehicle.Overspeed
 	}
 
 	// Validate GPS coordinates
@@ -189,8 +191,43 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 
 	// Determine if vehicle is moving based on speed
 	isMoving := false
-	if gpsData.Speed != nil && *gpsData.Speed > 0 {
-		isMoving = true
+	currentSpeed := 0
+	if gpsData.Speed != nil {
+		currentSpeed = *gpsData.Speed
+		isMoving = currentSpeed > 5 // Consider moving if speed > 5 km/h
+	}
+
+	// Check if device has any GPS data (never show nodata if GPS data exists)
+	var gpsCount int64
+	db.GetDB().Model(&models.GPSData{}).Where("imei = ?", gpsData.IMEI).Count(&gpsCount)
+	hasGPSData := gpsCount > 0
+
+	// Determine status purely based on GPS data, ignore device connection/WebSocket status
+	var connectionStatus string
+	dataAge := time.Since(gpsData.Timestamp)
+
+	// Apply user-specified status logic - based purely on GPS data
+	if !hasGPSData {
+		connectionStatus = "nodata" // Only if literally no GPS data exists
+	} else if dataAge >= time.Hour {
+		connectionStatus = "inactive" // More than 1 hour old GPS data
+	} else {
+		// GPS data is less than 1 hour old, determine based on ignition and movement
+		ignition := gpsData.Ignition
+
+		if ignition == "ON" && isMoving {
+			if currentSpeed > overspeedLimit {
+				connectionStatus = "overspeed"
+			} else {
+				connectionStatus = "running"
+			}
+		} else if ignition == "OFF" || ignition == "" {
+			connectionStatus = "stopped"
+		} else if ignition == "ON" && !isMoving {
+			connectionStatus = "idle"
+		} else {
+			connectionStatus = "stopped" // Default fallback
+		}
 	}
 
 	// Build battery information
@@ -236,7 +273,7 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 			Code:   gpsData.AlarmCode,
 			// Parse alarm type for specific flags
 			Emergency: gpsData.AlarmType == "Emergency",
-			Overspeed: gpsData.AlarmType == "Overspeed",
+			Overspeed: gpsData.AlarmType == "Overspeed" || connectionStatus == "overspeed",
 			LowPower:  gpsData.AlarmType == "Low Power",
 			Shock:     gpsData.AlarmType == "Shock",
 		}
@@ -254,12 +291,6 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 			bearingValue = bearingValue - 360*float64(int(bearingValue/360))
 		}
 		bearing = &bearingValue
-	}
-
-	// Determine connection status
-	connectionStatus := "connected"
-	if gpsData.Timestamp.Before(time.Now().Add(-1 * time.Hour)) {
-		connectionStatus = "timeout"
 	}
 
 	update := GPSUpdate{
@@ -283,7 +314,7 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		// Enhanced fields
 		IsMoving:         isMoving,
 		LastSeen:         gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
-		ConnectionStatus: connectionStatus,
+		ConnectionStatus: connectionStatus, // This is based on GPS data, not device connection
 		Bearing:          bearing,
 		LocationValid:    locationValid,
 	}
@@ -302,8 +333,8 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 			latStr = fmt.Sprintf("%.12f", *gpsData.Latitude)
 			lngStr = fmt.Sprintf("%.12f", *gpsData.Longitude)
 		}
-		colors.PrintData("📡", "Broadcasted enhanced GPS update for IMEI %s to %d clients (Lat: %s, Lng: %s, Valid: %v, Moving: %v)",
-			gpsData.IMEI, len(h.clients), latStr, lngStr, locationValid, isMoving)
+		colors.PrintData("📡", "Broadcasted GPS update for IMEI %s to %d clients (GPS Status: %s, Lat: %s, Lng: %s, Valid: %v, Moving: %v)",
+			gpsData.IMEI, len(h.clients), connectionStatus, latStr, lngStr, locationValid, isMoving)
 	} else {
 		colors.PrintError("Error marshaling GPS update: %v", err)
 	}
