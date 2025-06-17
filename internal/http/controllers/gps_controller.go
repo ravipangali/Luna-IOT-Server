@@ -1,13 +1,13 @@
 package controllers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
+	"luna_iot_server/pkg/colors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -114,8 +114,8 @@ func (gc *GPSController) GetGPSDataByIMEI(c *gin.Context) {
 func (gc *GPSController) GetLatestGPSData(c *gin.Context) {
 	var gpsData []models.GPSData
 
-	// Get latest GPS data for each IMEI - this is for status determination
-	// Always get the very latest GPS data regardless of device connection status
+	// ENHANCED FIX: Get latest GPS data for each IMEI regardless of device connection
+	// This ensures we always have GPS data even when devices are disconnected
 	if err := db.GetDB().Raw(`
 		SELECT DISTINCT ON (imei) *
 		FROM gps_data
@@ -128,31 +128,33 @@ func (gc *GPSController) GetLatestGPSData(c *gin.Context) {
 		return
 	}
 
-	// For each GPS data entry, if coordinates are null, try to get last valid location
-	// This ensures map markers can be positioned even when latest data has null coordinates
+	// ENHANCED: For each GPS data entry, if coordinates are null, get latest valid coordinates
+	// Status is always based on latest GPS data, coordinates use fallback for positioning
 	for i, data := range gpsData {
 		if data.Latitude == nil || data.Longitude == nil {
-			// Find last GPS data with valid coordinates for this IMEI for map positioning
+			// Find latest GPS data with valid coordinates for this IMEI
 			var validGPS models.GPSData
 			if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", data.IMEI).
 				Order("timestamp DESC").
 				First(&validGPS).Error; err == nil {
-				// Use coordinates from last valid location for map positioning
-				// But keep the original timestamp for status determination
+				// Use coordinates from latest valid location for map positioning
+				// Keep original timestamp for accurate status calculation
 				gpsData[i].Latitude = validGPS.Latitude
 				gpsData[i].Longitude = validGPS.Longitude
-				// Add a note about the location fallback
-				gpsData[i].RawPacket = fmt.Sprintf("Location from %s, status from %s",
-					validGPS.Timestamp.Format("2006-01-02T15:04:05Z"),
-					data.Timestamp.Format("2006-01-02T15:04:05Z"))
+
+				// Log the coordinate fallback for debugging
+				colors.PrintInfo("📍 Using coordinate fallback for %s: lat=%.6f, lng=%.6f from %s",
+					data.IMEI, *validGPS.Latitude, *validGPS.Longitude,
+					validGPS.Timestamp.Format("2006-01-02T15:04:05Z"))
 			}
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    gpsData,
 		"count":   len(gpsData),
-		"message": "Latest GPS data retrieved successfully - status based on latest data, location with fallback",
+		"message": "Latest GPS data retrieved - coordinates with database fallback, status from latest timestamp",
 	})
 }
 
@@ -208,9 +210,26 @@ func (gc *GPSController) GetLatestGPSDataByIMEI(c *gin.Context) {
 		return
 	}
 
+	// ENHANCED: If coordinates are null, get latest valid coordinates for positioning
+	if gpsData.Latitude == nil || gpsData.Longitude == nil {
+		var validGPS models.GPSData
+		if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", imei).
+			Order("timestamp DESC").
+			First(&validGPS).Error; err == nil {
+			// Use coordinates from latest valid location
+			gpsData.Latitude = validGPS.Latitude
+			gpsData.Longitude = validGPS.Longitude
+
+			colors.PrintInfo("📍 Coordinate fallback for %s: using lat=%.6f, lng=%.6f from %s",
+				imei, *validGPS.Latitude, *validGPS.Longitude,
+				validGPS.Timestamp.Format("2006-01-02T15:04:05Z"))
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    gpsData,
-		"message": "Latest GPS data retrieved successfully",
+		"message": "Latest GPS data retrieved - coordinates with database fallback if needed",
 	})
 }
 
