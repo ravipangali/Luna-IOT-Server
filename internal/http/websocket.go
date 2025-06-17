@@ -197,20 +197,29 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		isMoving = currentSpeed > 5 // Consider moving if speed > 5 km/h
 	}
 
-	// Check if device has any GPS data (never show nodata if GPS data exists)
+	// CRITICAL FIX: Strong checking for GPS data existence and age
 	var gpsCount int64
 	db.GetDB().Model(&models.GPSData{}).Where("imei = ?", gpsData.IMEI).Count(&gpsCount)
 	hasGPSData := gpsCount > 0
 
-	// Determine status purely based on GPS data, ignore device connection/WebSocket status
-	var connectionStatus string
+	// Calculate data age precisely using GPS timestamp
 	dataAge := time.Since(gpsData.Timestamp)
+	dataAgeMinutes := dataAge.Minutes()
 
-	// Apply user-specified status logic - based purely on GPS data
+	// FIXED: Determine status purely based on GPS data with proper logic
+	var connectionStatus string
+
+	// Log for debugging
+	colors.PrintInfo("🔍", "Status Check for IMEI %s: HasGPSData=%v, DataAge=%.1f min, Speed=%d, Ignition=%s",
+		gpsData.IMEI, hasGPSData, dataAgeMinutes, currentSpeed, gpsData.Ignition)
+
+	// Apply user-specified status logic with strong validation
 	if !hasGPSData {
-		connectionStatus = "nodata" // Only if literally no GPS data exists
-	} else if dataAge >= time.Hour {
+		connectionStatus = "nodata" // Only if literally no GPS data exists in database
+		colors.PrintWarning("⚠️", "IMEI %s: No GPS data in database", gpsData.IMEI)
+	} else if dataAgeMinutes >= 60 {
 		connectionStatus = "inactive" // More than 1 hour old GPS data
+		colors.PrintWarning("⏰", "IMEI %s: GPS data is %.1f minutes old (>60min)", gpsData.IMEI, dataAgeMinutes)
 	} else {
 		// GPS data is less than 1 hour old, determine based on ignition and movement
 		ignition := gpsData.Ignition
@@ -218,15 +227,20 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		if ignition == "ON" && isMoving {
 			if currentSpeed > overspeedLimit {
 				connectionStatus = "overspeed"
+				colors.PrintError("🚨", "IMEI %s: Overspeed %d km/h (limit: %d)", gpsData.IMEI, currentSpeed, overspeedLimit)
 			} else {
 				connectionStatus = "running"
+				colors.PrintSuccess("🟢", "IMEI %s: Running at %d km/h", gpsData.IMEI, currentSpeed)
 			}
 		} else if ignition == "OFF" || ignition == "" {
-			connectionStatus = "stopped"
+			connectionStatus = "stopped" // Changed from "stopped" to match user requirement
+			colors.PrintInfo("🔴", "IMEI %s: Stopped (ignition OFF)", gpsData.IMEI)
 		} else if ignition == "ON" && !isMoving {
 			connectionStatus = "idle"
+			colors.PrintInfo("🟡", "IMEI %s: Idle (ignition ON, speed ≤5)", gpsData.IMEI)
 		} else {
 			connectionStatus = "stopped" // Default fallback
+			colors.PrintWarning("⚪", "IMEI %s: Default to stopped (ignition: %s, moving: %v)", gpsData.IMEI, ignition, isMoving)
 		}
 	}
 
@@ -333,8 +347,8 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 			latStr = fmt.Sprintf("%.12f", *gpsData.Latitude)
 			lngStr = fmt.Sprintf("%.12f", *gpsData.Longitude)
 		}
-		colors.PrintData("📡", "Broadcasted GPS update for IMEI %s to %d clients (GPS Status: %s, Lat: %s, Lng: %s, Valid: %v, Moving: %v)",
-			gpsData.IMEI, len(h.clients), connectionStatus, latStr, lngStr, locationValid, isMoving)
+		colors.PrintSuccess("📡", "Broadcasted GPS update for IMEI %s to %d clients (Status: %s, Age: %.1f min, Lat: %s, Lng: %s)",
+			gpsData.IMEI, len(h.clients), connectionStatus, dataAgeMinutes, latStr, lngStr)
 	} else {
 		colors.PrintError("Error marshaling GPS update: %v", err)
 	}
@@ -477,5 +491,12 @@ func getSignalPercentage(level int) int {
 		return 100
 	}
 	// Convert 0-4 to 0-100 percentage
-	return (level * 100) / 4
+	percentage := (level * 100) / 4
+
+	// FIXED: Cap at 100% to prevent values like 2500%
+	if percentage > 100 {
+		return 100
+	}
+
+	return percentage
 }

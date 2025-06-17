@@ -77,8 +77,10 @@ func (g *GPSData) BeforeCreate(tx *gorm.DB) error {
 
 // IsValidLocation checks if GPS coordinates are valid
 func (g *GPSData) IsValidLocation() bool {
+	// Latitude: Only positive values (0-90)
+	// Longitude: Both negative and positive values (-180 to +180)
 	return g.Latitude != nil && g.Longitude != nil &&
-		*g.Latitude >= -90 && *g.Latitude <= 90 &&
+		*g.Latitude > 0 && *g.Latitude <= 90 &&
 		*g.Longitude >= -180 && *g.Longitude <= 180
 }
 

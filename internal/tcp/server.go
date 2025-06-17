@@ -241,20 +241,26 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
 
-	// Validate GPS coordinates before saving
+	// Validate and process GPS coordinates before saving
 	var hasValidGPS bool
 	if packet.Latitude != nil && packet.Longitude != nil {
 		lat := *packet.Latitude
 		lng := *packet.Longitude
 
-		// Basic GPS coordinate validation
-		if lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 &&
-			lat != 0 && lng != 0 { // Exclude null island (0,0)
+		// Convert negative latitude to positive (remove minus sign)
+		if lat < 0 {
+			lat = -lat
+			packet.Latitude = &lat
+		}
+
+		// Accept both negative and positive longitude values
+		// Latitude: 0-90 (positive only), Longitude: -180 to +180 (both negative/positive)
+		if lat > 0 && lat <= 90 && lng >= -180 && lng <= 180 {
 			hasValidGPS = true
 			colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%v km/h",
 				lat, lng, packet.Speed)
 		} else {
-			colors.PrintWarning("📍 Invalid GPS coordinates: Lat=%.12f, Lng=%.12f", lat, lng)
+			colors.PrintWarning("📍 Invalid GPS coordinates (out of range): Lat=%.12f, Lng=%.12f", lat, lng)
 		}
 	}
 

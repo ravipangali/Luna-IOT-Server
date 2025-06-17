@@ -329,15 +329,27 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 		if offset+12 <= len(data) {
 			latRaw := binary.BigEndian.Uint32(data[offset : offset+4])
 			if latRaw > 0 && latRaw < 0xFFFFFFFF {
-				lat := d.calculateLatitude(latRaw)
-				result.Latitude = &lat
+				lat := float64(latRaw) / 1800000.0
+
+				// Convert negative latitude to positive (remove minus sign)
+				if lat < 0 {
+					lat = -lat
+				}
+
+				if lat > 0 && lat <= 90 {
+					result.Latitude = &lat
+				}
 			}
 			offset += 4
 
 			lngRaw := binary.BigEndian.Uint32(data[offset : offset+4])
 			if lngRaw > 0 && lngRaw < 0xFFFFFFFF {
-				lng := d.calculateLongitude(lngRaw)
-				result.Longitude = &lng
+				lng := float64(lngRaw) / 1800000.0
+
+				// Accept both negative and positive longitude values
+				if lng >= -180 && lng <= 180 {
+					result.Longitude = &lng
+				}
 			}
 			offset += 4
 
@@ -362,13 +374,20 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 				northLatitude := (courseStatus & 0x0400) == 0
 				result.NorthLatitude = &northLatitude
 
-				// Adjust coordinates based on hemisphere flags
-				if result.Longitude != nil && !*result.EastLongitude {
+				// Apply hemisphere corrections for longitude only
+				// Longitude: negative for western hemisphere, positive for eastern
+				if result.Longitude != nil && !eastLongitude {
 					lng := -*result.Longitude
 					result.Longitude = &lng
 				}
-				if result.Latitude != nil && !*result.NorthLatitude {
-					lat := -*result.Latitude
+
+				// For latitude: always convert to positive regardless of hemisphere
+				if result.Latitude != nil && !northLatitude {
+					// Convert negative latitude to positive
+					lat := *result.Latitude
+					if lat < 0 {
+						lat = -lat
+					}
 					result.Latitude = &lat
 				}
 
@@ -427,7 +446,7 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 	// 				latRaw := (uint32(lat1) << 24) | (uint32(lat2) << 16) | (uint32(lat3) << 8) | uint32(lat4)
 
 	// 				if latRaw > 0 {
-	// 					lat := d.calculateLatitude(latRaw)
+	// 					lat := float64(latRaw) / 1800000.0
 	// 					result.Latitude = &lat
 	// 				}
 	// 				offset += 4
@@ -437,7 +456,7 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 	// 				lngRaw := binary.BigEndian.Uint32(data[offset : offset+4])
 
 	// 				if lngRaw > 0 {
-	// 					lng := d.calculateLongitude(lngRaw)
+	// 					lng := float64(lngRaw) / 1800000.0
 	// 					result.Longitude = &lng
 	// 				}
 	// 				offset += 4
@@ -724,38 +743,4 @@ func (d *GT06Decoder) calculateCRC(data []byte) uint16 {
 		}
 	}
 	return (^crc) & 0xFFFF
-}
-
-// calculateLatitude converts raw latitude value to decimal degrees using GT06 protocol algorithm
-// Range: 0 - 162000000, Scaling Factor: 30000
-// Algorithm: raw / 30000 = total minutes, then convert to decimal degrees
-func (d *GT06Decoder) calculateLatitude(latRaw uint32) float64 {
-	if latRaw == 0 || latRaw >= 0xFFFFFFFF {
-		return 0.0
-	}
-
-	// Step 1: Divide by 30000 to get total minutes
-	totalMinutes := float64(latRaw) / 30000.0
-
-	// Step 2: Convert minutes to decimal degrees (60 minutes = 1 degree)
-	decimalDegrees := totalMinutes / 60.0
-
-	return decimalDegrees
-}
-
-// calculateLongitude converts raw longitude value to decimal degrees using GT06 protocol algorithm
-// Range: 0 - 324000000, Scaling Factor: 60000 (as shown in the example)
-// Algorithm: raw / 60000 = total minutes, then convert to decimal degrees
-func (d *GT06Decoder) calculateLongitude(lngRaw uint32) float64 {
-	if lngRaw == 0 || lngRaw >= 0xFFFFFFFF {
-		return 0.0
-	}
-
-	// Step 1: Divide by 60000 to get total minutes (as shown in the algorithm example)
-	totalMinutes := float64(lngRaw) / 60000.0
-
-	// Step 2: Convert minutes to decimal degrees (60 minutes = 1 degree)
-	decimalDegrees := totalMinutes / 60.0
-
-	return decimalDegrees
 }
