@@ -221,10 +221,12 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		connectionStatus = "inactive" // More than 1 hour old GPS data
 		colors.PrintWarning("⏰", "IMEI %s: GPS data is %.1f minutes old (>60min)", gpsData.IMEI, dataAgeMinutes)
 	} else {
-		// GPS data is less than 1 hour old, determine based on ignition and movement
+		// GPS data is less than 1 hour old, determine based on speed first
 		ignition := gpsData.Ignition
 
-		if ignition == "ON" && isMoving {
+		// FIXED: For running and overspeed states, only speed matters (ignore ignition and connection)
+		// Speed > 5 = running state regardless of device connection status
+		if isMoving { // isMoving means speed > 5
 			if currentSpeed > overspeedLimit {
 				connectionStatus = "overspeed"
 				colors.PrintError("🚨", "IMEI %s: Overspeed %d km/h (limit: %d)", gpsData.IMEI, currentSpeed, overspeedLimit)
@@ -232,15 +234,15 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 				connectionStatus = "running"
 				colors.PrintSuccess("🟢", "IMEI %s: Running at %d km/h", gpsData.IMEI, currentSpeed)
 			}
-		} else if ignition == "OFF" || ignition == "" {
-			connectionStatus = "stopped" // Changed from "stopped" to match user requirement
-			colors.PrintInfo("🔴", "IMEI %s: Stopped (ignition OFF)", gpsData.IMEI)
-		} else if ignition == "ON" && !isMoving {
-			connectionStatus = "idle"
-			colors.PrintInfo("🟡", "IMEI %s: Idle (ignition ON, speed ≤5)", gpsData.IMEI)
 		} else {
-			connectionStatus = "stopped" // Default fallback
-			colors.PrintWarning("⚪", "IMEI %s: Default to stopped (ignition: %s, moving: %v)", gpsData.IMEI, ignition, isMoving)
+			// For speeds <= 5, check ignition status to differentiate between idle and stop
+			if ignition == "ON" {
+				connectionStatus = "idle"
+				colors.PrintInfo("🟡", "IMEI %s: Idle (ignition ON, speed ≤5)", gpsData.IMEI)
+			} else {
+				connectionStatus = "stop" // Changed to "stop" to match frontend
+				colors.PrintInfo("🔴", "IMEI %s: Stopped (ignition OFF or speed ≤5)", gpsData.IMEI)
+			}
 		}
 	}
 
