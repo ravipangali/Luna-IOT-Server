@@ -349,8 +349,26 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 			latStr = fmt.Sprintf("%.12f", *gpsData.Latitude)
 			lngStr = fmt.Sprintf("%.12f", *gpsData.Longitude)
 		}
-		colors.PrintSuccess("📡", "Broadcasted GPS update for IMEI %s to %d clients (Status: %s, Age: %.1f min, Lat: %s, Lng: %s)",
-			gpsData.IMEI, len(h.clients), connectionStatus, dataAgeMinutes, latStr, lngStr)
+
+		// Enhanced logging with course/bearing information for map rotation debugging
+		courseStr := "N/A"
+		bearingStr := "N/A"
+		if gpsData.Course != nil {
+			courseStr = fmt.Sprintf("%d°", *gpsData.Course)
+		}
+		if bearing != nil {
+			bearingStr = fmt.Sprintf("%.1f°", *bearing)
+		}
+
+		colors.PrintSuccess("📡", "Broadcasted GPS update for IMEI %s to %d clients (Status: %s, Age: %.1f min, Lat: %s, Lng: %s, Course: %s, Bearing: %s, Speed: %d km/h)",
+			gpsData.IMEI, len(h.clients), connectionStatus, dataAgeMinutes, latStr, lngStr, courseStr, bearingStr,
+			func() int {
+				if gpsData.Speed != nil {
+					return *gpsData.Speed
+				} else {
+					return 0
+				}
+			}())
 	} else {
 		colors.PrintError("Error marshaling GPS update: %v", err)
 	}
