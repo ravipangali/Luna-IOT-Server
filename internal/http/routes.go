@@ -97,6 +97,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		{
 			gps.GET("", gpsController.GetGPSData)
 			gps.GET("/latest", gpsController.GetLatestGPSData)
+			gps.GET("/latest-valid", gpsController.GetLatestValidGPSData)
 			gps.GET("/:imei", gpsController.GetGPSDataByIMEI)
 			gps.GET("/:imei/latest", gpsController.GetLatestGPSDataByIMEI)
 			gps.GET("/:imei/latest-valid", gpsController.GetLatestValidGPSDataByIMEI)

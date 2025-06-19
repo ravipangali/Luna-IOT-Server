@@ -313,3 +313,36 @@ func (gc *GPSController) DeleteGPSData(c *gin.Context) {
 		"message": "GPS data deleted successfully",
 	})
 }
+
+// GetLatestValidGPSData returns the latest GPS data with valid coordinates for all devices
+func (gc *GPSController) GetLatestValidGPSData(c *gin.Context) {
+	var gpsData []models.GPSData
+
+	// Get latest GPS data with valid coordinates for each IMEI
+	// This query selects the most recent GPS record with non-null coordinates for each device
+	if err := db.GetDB().Raw(`
+		SELECT DISTINCT ON (imei) *
+		FROM gps_data
+		WHERE deleted_at IS NULL 
+		AND latitude IS NOT NULL 
+		AND longitude IS NOT NULL
+		AND latitude != 0 
+		AND longitude != 0
+		ORDER BY imei, timestamp DESC
+	`).Preload("Device").Preload("Vehicle").Scan(&gpsData).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch latest valid GPS data",
+		})
+		return
+	}
+
+	colors.PrintInfo("📍 Retrieved latest valid GPS data for %d devices", len(gpsData))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gpsData,
+		"count":   len(gpsData),
+		"message": "Latest valid GPS data retrieved successfully",
+	})
+}
