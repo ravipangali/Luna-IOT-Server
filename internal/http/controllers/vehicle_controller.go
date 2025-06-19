@@ -99,17 +99,40 @@ func parseInt(s string) int {
 func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	imei := c.Param("imei")
 	if len(imei) != 16 {
+		colors.PrintError("Invalid IMEI format for vehicle lookup: %s (length: %d)", imei, len(imei))
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid IMEI format",
+			"success": false,
+			"error":   "Invalid IMEI format",
+			"message": "IMEI must be exactly 16 digits",
 		})
 		return
 	}
 
+	colors.PrintInfo("🔍 Looking up vehicle with IMEI: %s", imei)
+
 	var vehicle models.Vehicle
 	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Vehicle not found",
-		})
+		colors.PrintError("❌ Vehicle not found for IMEI: %s, error: %v", imei, err)
+
+		// Check if device exists but vehicle doesn't
+		var device models.Device
+		if deviceErr := db.GetDB().Where("imei = ?", imei).First(&device).Error; deviceErr == nil {
+			colors.PrintWarning("⚠️  Device exists but vehicle not registered for IMEI: %s", imei)
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   "Vehicle not registered",
+				"message": "Device exists but no vehicle is registered with this IMEI",
+				"imei":    imei,
+			})
+		} else {
+			colors.PrintError("❌ Device also not found for IMEI: %s", imei)
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   "Vehicle not found",
+				"message": "No vehicle found with this IMEI",
+				"imei":    imei,
+			})
+		}
 		return
 	}
 
@@ -117,9 +140,15 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	var device models.Device
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
 		vehicle.Device = device
+		colors.PrintInfo("📱 Device loaded for vehicle: %s", device.SimNo)
+	} else {
+		colors.PrintWarning("⚠️  No device found for vehicle IMEI: %s", vehicle.IMEI)
 	}
 
+	colors.PrintSuccess("✅ Vehicle found: %s (%s) - %s", vehicle.Name, vehicle.RegNo, vehicle.VehicleType)
+
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    vehicle,
 		"message": "Vehicle retrieved successfully",
 	})
