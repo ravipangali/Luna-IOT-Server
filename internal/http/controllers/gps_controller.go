@@ -150,6 +150,7 @@ func (gc *GPSController) GetLatestGPSData(c *gin.Context) {
 }
 
 // GetLatestValidGPSDataByIMEI returns the latest GPS data with valid coordinates for a specific device
+// This implements historical fallback: searches from latest to oldest until finding valid coordinates
 func (gc *GPSController) GetLatestValidGPSDataByIMEI(c *gin.Context) {
 	imei := c.Param("imei")
 	if len(imei) != 16 {
@@ -159,41 +160,19 @@ func (gc *GPSController) GetLatestValidGPSDataByIMEI(c *gin.Context) {
 		return
 	}
 
-	colors.PrintInfo("📍 Searching for valid GPS data for IMEI: %s", imei)
+	colors.PrintInfo("📍 Searching for valid GPS data for IMEI: %s with historical fallback", imei)
 
 	var gpsData models.GPSData
 
-	// ENHANCED: Try multiple fallback levels to find valid GPS data
-	// Level 1: Latest GPS data with non-null and non-zero coordinates
-	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 AND longitude != 0").
+	// ENHANCED HISTORICAL FALLBACK STRATEGY
+	// Get all GPS records for this IMEI ordered by timestamp (latest first)
+	var allGPSData []models.GPSData
+	if err := db.GetDB().Where("imei = ?", imei).
 		Preload("Device").
 		Preload("Vehicle").
 		Order("timestamp DESC").
-		First(&gpsData).Error
-
-	if err != nil {
-		colors.PrintWarning("📍 Level 1 failed for IMEI %s, trying Level 2 (non-null coordinates)...", imei)
-
-		// Level 2: Latest GPS data with non-null coordinates (allow zero values)
-		err = db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL").
-			Preload("Device").
-			Preload("Vehicle").
-			Order("timestamp DESC").
-			First(&gpsData).Error
-	}
-
-	if err != nil {
-		colors.PrintWarning("📍 Level 2 failed for IMEI %s, trying Level 3 (any GPS data)...", imei)
-
-		// Level 3: Any GPS data for this IMEI
-		err = db.GetDB().Where("imei = ?").
-			Preload("Device").
-			Preload("Vehicle").
-			Order("timestamp DESC").
-			First(&gpsData).Error
-	}
-
-	if err != nil {
+		Limit(100). // Limit to last 100 records for performance
+		Find(&allGPSData).Error; err != nil {
 		colors.PrintError("📍 No GPS data found for IMEI %s: %v", imei, err)
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "No GPS data found for this device",
@@ -203,25 +182,59 @@ func (gc *GPSController) GetLatestValidGPSDataByIMEI(c *gin.Context) {
 		return
 	}
 
-	// Check if we have valid coordinates
-	hasValidCoords := gpsData.Latitude != nil && gpsData.Longitude != nil
-	validCoordsMsg := "Found GPS data but coordinates are null/invalid"
+	if len(allGPSData) == 0 {
+		colors.PrintError("📍 No GPS records found for IMEI %s", imei)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "No GPS data found for this device",
+			"message": "This device has never sent GPS data to the server",
+			"imei":    imei,
+		})
+		return
+	}
 
-	if hasValidCoords {
-		lat := *gpsData.Latitude
-		lng := *gpsData.Longitude
-		if lat != 0 && lng != 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
-			validCoordsMsg = "Found GPS data with valid coordinates"
+	// Search through GPS data from latest to oldest until finding valid coordinates
+	foundValidCoords := false
+	for i, data := range allGPSData {
+		colors.PrintDebug("📍 Checking GPS record %d/%d for IMEI %s: timestamp=%s, lat=%v, lng=%v",
+			i+1, len(allGPSData), imei, data.Timestamp.Format("2006-01-02 15:04:05"), data.Latitude, data.Longitude)
+
+		// Check if this record has valid coordinates
+		if data.Latitude != nil && data.Longitude != nil {
+			lat := *data.Latitude
+			lng := *data.Longitude
+
+			// Validate coordinate ranges and non-zero values
+			if lat != 0 && lng != 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
+				gpsData = data
+				foundValidCoords = true
+				colors.PrintSuccess("📍 Found valid coordinates for IMEI %s at record %d: lat=%.12f, lng=%.12f, timestamp=%s",
+					imei, i+1, lat, lng, data.Timestamp.Format("2006-01-02 15:04:05"))
+				break
+			} else {
+				colors.PrintDebug("📍 Record %d has invalid coordinate values: lat=%.12f, lng=%.12f", i+1, lat, lng)
+			}
+		} else {
+			colors.PrintDebug("📍 Record %d has null coordinates", i+1)
 		}
 	}
 
-	colors.PrintSuccess("📍 %s for IMEI %s: timestamp=%s", validCoordsMsg, imei, gpsData.Timestamp.Format("2006-01-02 15:04:05"))
+	if !foundValidCoords {
+		colors.PrintWarning("📍 No valid coordinates found in %d GPS records for IMEI %s", len(allGPSData), imei)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":           "No valid GPS coordinates found",
+			"message":         "Device has GPS data but no valid coordinate history",
+			"imei":            imei,
+			"records_checked": len(allGPSData),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":               true,
 		"data":                  gpsData,
-		"message":               "Latest GPS data retrieved successfully",
-		"has_valid_coordinates": hasValidCoords,
+		"message":               "Latest valid GPS coordinates found through historical fallback",
+		"has_valid_coordinates": true,
+		"records_checked":       len(allGPSData),
 	})
 }
 
@@ -525,4 +538,82 @@ func (gc *GPSController) GetStatusDataByIMEI(c *gin.Context) {
 		"message": "Status data retrieved successfully",
 		"type":    "status",
 	})
+}
+
+// GetIndividualTrackingData returns both status and location data for individual vehicle tracking
+// This endpoint provides separate status and location data for optimal individual tracking experience
+func (gc *GPSController) GetIndividualTrackingData(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid IMEI format",
+		})
+		return
+	}
+
+	colors.PrintInfo("📍 Getting individual tracking data for IMEI: %s", imei)
+
+	// Get latest status data (for ignition, battery, etc.)
+	var latestStatusData models.GPSData
+	statusFound := false
+	if err := db.GetDB().Where("imei = ?", imei).
+		Preload("Device").
+		Preload("Vehicle").
+		Order("timestamp DESC").
+		First(&latestStatusData).Error; err == nil {
+		statusFound = true
+		colors.PrintInfo("📊 Found latest status data for IMEI %s: timestamp=%s",
+			imei, latestStatusData.Timestamp.Format("2006-01-02 15:04:05"))
+	}
+
+	// Get latest valid location data (with historical fallback)
+	var locationData *models.GPSData
+	var allGPSData []models.GPSData
+	if err := db.GetDB().Where("imei = ?", imei).
+		Preload("Device").
+		Preload("Vehicle").
+		Order("timestamp DESC").
+		Limit(100). // Check last 100 records
+		Find(&allGPSData).Error; err == nil {
+
+		// Search for valid coordinates in historical data
+		for i, data := range allGPSData {
+			if data.Latitude != nil && data.Longitude != nil {
+				lat := *data.Latitude
+				lng := *data.Longitude
+
+				if lat != 0 && lng != 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
+					locationData = &data
+					colors.PrintSuccess("📍 Found valid location data for IMEI %s at record %d: lat=%.12f, lng=%.12f, timestamp=%s",
+						imei, i+1, lat, lng, data.Timestamp.Format("2006-01-02 15:04:05"))
+					break
+				}
+			}
+		}
+	}
+
+	response := gin.H{
+		"success": true,
+		"imei":    imei,
+		"message": "Individual tracking data retrieved successfully",
+	}
+
+	if statusFound {
+		response["status_data"] = latestStatusData
+		response["has_status"] = true
+	} else {
+		response["has_status"] = false
+		colors.PrintWarning("📊 No status data found for IMEI %s", imei)
+	}
+
+	if locationData != nil {
+		response["location_data"] = locationData
+		response["has_location"] = true
+		response["location_is_historical"] = locationData.Timestamp.Before(latestStatusData.Timestamp)
+	} else {
+		response["has_location"] = false
+		colors.PrintWarning("📍 No valid location data found for IMEI %s", imei)
+	}
+
+	c.JSON(http.StatusOK, response)
 }

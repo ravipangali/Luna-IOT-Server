@@ -111,6 +111,9 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			gps.GET("/:imei/location", gpsController.GetLocationDataByIMEI)
 			gps.GET("/:imei/status", gpsController.GetStatusDataByIMEI)
 
+			// NEW: Combined endpoint for individual tracking with historical fallback
+			gps.GET("/:imei/individual-tracking", gpsController.GetIndividualTrackingData)
+
 			gps.GET("/:imei/route", gpsController.GetGPSRoute)
 			gps.DELETE("/:id", middleware.AdminOnlyMiddleware(), gpsController.DeleteGPSData) // Admin only
 		}
