@@ -17,7 +17,8 @@ type GPSData struct {
 	Latitude  *float64 `json:"latitude" gorm:"type:decimal(15,12)"`
 	Longitude *float64 `json:"longitude" gorm:"type:decimal(15,12)"`
 	Speed     *int     `json:"speed"`    // km/h
-	Course    *int     `json:"course"`   // degrees
+	Course    *int     `json:"course"`   // degrees (0-360)
+	Bearing   *float64 `json:"bearing"`  // calculated bearing for map rotation (0-360)
 	Altitude  *int     `json:"altitude"` // meters
 
 	// GPS Status
