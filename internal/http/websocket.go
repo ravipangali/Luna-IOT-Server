@@ -2,7 +2,6 @@ package http
 
 import (
 	"encoding/json"
-	"fmt"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
@@ -39,7 +38,54 @@ type WebSocketMessage struct {
 	Data      interface{} `json:"data"`
 }
 
-// GPSUpdate represents real-time GPS data
+// LocationUpdate represents real-time GPS location data (with coordinates)
+type LocationUpdate struct {
+	IMEI         string   `json:"imei"`
+	DeviceName   string   `json:"device_name,omitempty"`
+	VehicleName  string   `json:"vehicle_name,omitempty"`
+	RegNo        string   `json:"reg_no,omitempty"`
+	VehicleType  string   `json:"vehicle_type,omitempty"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
+	Speed        *int     `json:"speed"`
+	Course       *int     `json:"course"`
+	Altitude     *int     `json:"altitude"` // meters above sea level
+	Timestamp    string   `json:"timestamp"`
+	ProtocolName string   `json:"protocol_name"`
+
+	// Map rotation support
+	Bearing *float64 `json:"bearing,omitempty"` // Course converted to bearing (0-360)
+
+	// Enhanced location validation
+	LocationValid bool `json:"location_valid"`
+	Accuracy      *int `json:"accuracy,omitempty"`
+}
+
+// StatusUpdate represents real-time device status data (without coordinates requirement)
+type StatusUpdate struct {
+	IMEI         string `json:"imei"`
+	DeviceName   string `json:"device_name,omitempty"`
+	VehicleName  string `json:"vehicle_name,omitempty"`
+	RegNo        string `json:"reg_no,omitempty"`
+	VehicleType  string `json:"vehicle_type,omitempty"`
+	Speed        *int   `json:"speed"`
+	Ignition     string `json:"ignition"`
+	Timestamp    string `json:"timestamp"`
+	ProtocolName string `json:"protocol_name"`
+
+	// Enhanced status information
+	Battery      *BatteryInfo `json:"battery,omitempty"`
+	Signal       *SignalInfo  `json:"signal,omitempty"`
+	DeviceStatus *DeviceInfo  `json:"device_status,omitempty"`
+	AlarmStatus  *AlarmInfo   `json:"alarm_status,omitempty"`
+
+	// Additional fields for better tracking
+	IsMoving         bool   `json:"is_moving"`
+	LastSeen         string `json:"last_seen"`
+	ConnectionStatus string `json:"connection_status"` // "connected", "stopped", "inactive"
+}
+
+// GPSUpdate represents real-time GPS data (LEGACY - for backward compatibility)
 type GPSUpdate struct {
 	IMEI         string   `json:"imei"`
 	DeviceName   string   `json:"device_name,omitempty"`
@@ -172,17 +218,34 @@ func (h *WebSocketHub) Run() {
 
 // BroadcastGPSUpdate sends GPS data updates to all connected clients
 func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
+	// Check if this is location data or status data
+	hasValidCoordinates := false
+	if gpsData.Latitude != nil && gpsData.Longitude != nil {
+		lat := *gpsData.Latitude
+		lng := *gpsData.Longitude
+		hasValidCoordinates = lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat != 0 && lng != 0
+	}
+
+	if hasValidCoordinates {
+		// This is location data - broadcast as location update
+		h.BroadcastLocationUpdate(gpsData, vehicleName, regNo)
+	} else {
+		// This is status data - broadcast as status update
+		h.BroadcastStatusUpdate(gpsData, vehicleName, regNo)
+	}
+}
+
+// BroadcastLocationUpdate sends location data updates to all connected clients
+// Only broadcasts when valid coordinates are present
+func (h *WebSocketHub) BroadcastLocationUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
 	// Get vehicle information for overspeed checking
 	var vehicle models.Vehicle
 	vehicleType := ""
-	overspeedLimit := 60 // Default overspeed limit
 	if err := db.GetDB().Where("imei = ?", gpsData.IMEI).First(&vehicle).Error; err == nil {
 		vehicleType = string(vehicle.VehicleType)
-		overspeedLimit = vehicle.Overspeed
 	}
 
 	// CRITICAL CHECK: Only broadcast if we have valid GPS coordinates
-	// This ensures markers are only shown when we have actual location data
 	locationValid := false
 	if gpsData.Latitude != nil && gpsData.Longitude != nil {
 		lat := *gpsData.Latitude
@@ -190,12 +253,68 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		locationValid = lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat != 0 && lng != 0
 	}
 
-	// If coordinates are invalid or null, don't broadcast GPS update
-	// This prevents showing markers on map without valid location data
+	// If coordinates are invalid or null, don't broadcast location update
 	if !locationValid {
-		colors.PrintWarning("📍 Not broadcasting GPS update for IMEI %s - invalid or null coordinates (lat=%v, lng=%v)",
+		colors.PrintWarning("📍 Not broadcasting location update for IMEI %s - invalid or null coordinates (lat=%v, lng=%v)",
 			gpsData.IMEI, gpsData.Latitude, gpsData.Longitude)
 		return
+	}
+
+	// Convert course to bearing for map rotation (0-360 degrees)
+	var bearing *float64
+	if gpsData.Course != nil {
+		bearingValue := float64(*gpsData.Course)
+		// Ensure bearing is in 0-360 range
+		if bearingValue < 0 {
+			bearingValue += 360
+		}
+		if bearingValue >= 360 {
+			bearingValue = bearingValue - 360*float64(int(bearingValue/360))
+		}
+		bearing = &bearingValue
+	}
+
+	locationUpdate := LocationUpdate{
+		IMEI:          gpsData.IMEI,
+		VehicleName:   vehicleName,
+		RegNo:         regNo,
+		VehicleType:   vehicleType,
+		Latitude:      gpsData.Latitude,
+		Longitude:     gpsData.Longitude,
+		Speed:         gpsData.Speed,
+		Course:        gpsData.Course,
+		Altitude:      gpsData.Altitude,
+		Timestamp:     gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
+		ProtocolName:  gpsData.ProtocolName,
+		Bearing:       bearing,
+		LocationValid: locationValid,
+	}
+
+	message := WebSocketMessage{
+		Type:      "location_update",
+		Timestamp: gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
+		Data:      locationUpdate,
+	}
+
+	if data, err := json.Marshal(message); err == nil {
+		h.broadcast <- data
+		colors.PrintSuccess("📍 Broadcasted location update for IMEI %s to %d clients (Lat: %.12f, Lng: %.12f)",
+			gpsData.IMEI, len(h.clients), *gpsData.Latitude, *gpsData.Longitude)
+	} else {
+		colors.PrintError("Error marshaling location update: %v", err)
+	}
+}
+
+// BroadcastStatusUpdate sends status data updates to all connected clients
+// Broadcasts device status information regardless of coordinates
+func (h *WebSocketHub) BroadcastStatusUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
+	// Get vehicle information
+	var vehicle models.Vehicle
+	vehicleType := ""
+	overspeedLimit := 60 // Default overspeed limit
+	if err := db.GetDB().Where("imei = ?", gpsData.IMEI).First(&vehicle).Error; err == nil {
+		vehicleType = string(vehicle.VehicleType)
+		overspeedLimit = vehicle.Overspeed
 	}
 
 	// Determine if vehicle is moving based on speed
@@ -206,53 +325,29 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		isMoving = currentSpeed > 5 // Consider moving if speed > 5 km/h
 	}
 
-	// CRITICAL FIX: Strong checking for GPS data existence and age
-	var gpsCount int64
-	db.GetDB().Model(&models.GPSData{}).Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", gpsData.IMEI).Count(&gpsCount)
-	hasGPSData := gpsCount > 0
-
 	// Calculate data age precisely using GPS timestamp
 	dataAge := time.Since(gpsData.Timestamp)
 	dataAgeMinutes := dataAge.Minutes()
 
-	// FIXED: Determine status purely based on GPS data with proper logic
+	// Determine connection status based on data age and GPS availability
 	var connectionStatus string
-
-	// Log for debugging
-	colors.PrintInfo("🔍 Status Check for IMEI %s: HasGPSData=%v, DataAge=%.1f min, Speed=%d, Ignition=%s",
-		gpsData.IMEI, hasGPSData, dataAgeMinutes, currentSpeed, gpsData.Ignition)
-
-	// Apply user-specified status logic with strong validation
-	if !hasGPSData {
-		connectionStatus = "nodata" // Only if literally no GPS data exists in database
-		colors.PrintWarning("⚠️ IMEI %s: No GPS data with valid coordinates in database", gpsData.IMEI)
-	} else if dataAgeMinutes >= 60 {
-		connectionStatus = "inactive" // More than 1 hour old GPS data
-		colors.PrintWarning("⏰ IMEI %s: GPS data is %.1f minutes old (>60min)", gpsData.IMEI, dataAgeMinutes)
-	} else {
-		// GPS data is less than 1 hour old, determine based on speed first
-		ignition := gpsData.Ignition
-
-		// FIXED: For running and overspeed states, only speed matters (ignore ignition and connection)
-		// Speed > 5 = running state regardless of device connection status
-		if isMoving { // isMoving means speed > 5
-			if currentSpeed > overspeedLimit {
-				connectionStatus = "overspeed"
-				colors.PrintError("🚨 IMEI %s: Overspeed %d km/h (limit: %d)", gpsData.IMEI, currentSpeed, overspeedLimit)
-			} else {
-				connectionStatus = "running"
-				colors.PrintSuccess("🟢 IMEI %s: Running at %d km/h", gpsData.IMEI, currentSpeed)
-			}
+	if dataAgeMinutes <= 5 {
+		if isMoving {
+			connectionStatus = "running"
+		} else if gpsData.Ignition == "ON" {
+			connectionStatus = "idle"
 		} else {
-			// For speeds <= 5, check ignition status to differentiate between idle and stop
-			if ignition == "ON" {
-				connectionStatus = "idle"
-				colors.PrintInfo("🟡 IMEI %s: Idle (ignition ON, speed ≤5)", gpsData.IMEI)
-			} else {
-				connectionStatus = "stop" // Changed to "stop" to match frontend
-				colors.PrintInfo("🔴 IMEI %s: Stopped (ignition OFF or speed ≤5)", gpsData.IMEI)
-			}
+			connectionStatus = "stopped"
 		}
+	} else if dataAgeMinutes <= 60 {
+		connectionStatus = "inactive"
+	} else {
+		connectionStatus = "nodata"
+	}
+
+	// Check for overspeed condition
+	if currentSpeed > overspeedLimit && overspeedLimit > 0 {
+		connectionStatus = "overspeed"
 	}
 
 	// Build battery information
@@ -277,13 +372,13 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		}
 	}
 
-	// Build device status information with improved ignition logic
+	// Build device status information
 	deviceStatus := &DeviceInfo{
 		Activated:     gpsData.DeviceStatus == "ACTIVATED",
 		GPSTracking:   gpsData.GPSTracking == "ENABLED",
 		OilConnected:  gpsData.OilElectricity == "CONNECTED",
 		EngineRunning: gpsData.Ignition == "ON",
-		Satellites:    0, // Will be set if available
+		Satellites:    0,
 	}
 	if gpsData.Satellites != nil {
 		deviceStatus.Satellites = *gpsData.Satellites
@@ -293,10 +388,9 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 	var alarmStatus *AlarmInfo
 	if gpsData.AlarmActive {
 		alarmStatus = &AlarmInfo{
-			Active: gpsData.AlarmActive,
-			Type:   gpsData.AlarmType,
-			Code:   gpsData.AlarmCode,
-			// Parse alarm type for specific flags
+			Active:    gpsData.AlarmActive,
+			Type:      gpsData.AlarmType,
+			Code:      gpsData.AlarmCode,
 			Emergency: gpsData.AlarmType == "Emergency",
 			Overspeed: gpsData.AlarmType == "Overspeed" || connectionStatus == "overspeed",
 			LowPower:  gpsData.AlarmType == "Low Power",
@@ -304,30 +398,12 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		}
 	}
 
-	// Convert course to bearing for map rotation (0-360 degrees)
-	var bearing *float64
-	if gpsData.Course != nil {
-		bearingValue := float64(*gpsData.Course)
-		// Ensure bearing is in 0-360 range
-		if bearingValue < 0 {
-			bearingValue += 360
-		}
-		if bearingValue >= 360 {
-			bearingValue = bearingValue - 360*float64(int(bearingValue/360))
-		}
-		bearing = &bearingValue
-	}
-
-	update := GPSUpdate{
+	statusUpdate := StatusUpdate{
 		IMEI:         gpsData.IMEI,
 		VehicleName:  vehicleName,
 		RegNo:        regNo,
 		VehicleType:  vehicleType,
-		Latitude:     gpsData.Latitude,
-		Longitude:    gpsData.Longitude,
 		Speed:        gpsData.Speed,
-		Course:       gpsData.Course,
-		Altitude:     gpsData.Altitude,
 		Ignition:     gpsData.Ignition,
 		Timestamp:    gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
 		ProtocolName: gpsData.ProtocolName,
@@ -339,47 +415,21 @@ func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, 
 		// Enhanced fields
 		IsMoving:         isMoving,
 		LastSeen:         gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
-		ConnectionStatus: connectionStatus, // This is based on GPS data, not device connection
-		Bearing:          bearing,
-		LocationValid:    locationValid,
+		ConnectionStatus: connectionStatus,
 	}
 
 	message := WebSocketMessage{
-		Type:      "gps_update",
+		Type:      "status_update",
 		Timestamp: gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
-		Data:      update,
+		Data:      statusUpdate,
 	}
 
 	if data, err := json.Marshal(message); err == nil {
 		h.broadcast <- data
-		latStr := "N/A"
-		lngStr := "N/A"
-		if gpsData.Latitude != nil && gpsData.Longitude != nil {
-			latStr = fmt.Sprintf("%.12f", *gpsData.Latitude)
-			lngStr = fmt.Sprintf("%.12f", *gpsData.Longitude)
-		}
-
-		// Enhanced logging with course/bearing information for map rotation debugging
-		courseStr := "N/A"
-		bearingStr := "N/A"
-		if gpsData.Course != nil {
-			courseStr = fmt.Sprintf("%d°", *gpsData.Course)
-		}
-		if bearing != nil {
-			bearingStr = fmt.Sprintf("%.1f°", *bearing)
-		}
-
-		colors.PrintSuccess("📡 Broadcasted GPS update for IMEI %s to %d clients (Status: %s, Age: %.1f min, Lat: %s, Lng: %s, Course: %s, Bearing: %s, Speed: %d km/h)",
-			gpsData.IMEI, len(h.clients), connectionStatus, dataAgeMinutes, latStr, lngStr, courseStr, bearingStr,
-			func() int {
-				if gpsData.Speed != nil {
-					return *gpsData.Speed
-				} else {
-					return 0
-				}
-			}())
+		colors.PrintSuccess("📊 Broadcasted status update for IMEI %s to %d clients (Status: %s, Speed: %d km/h, Ignition: %s)",
+			gpsData.IMEI, len(h.clients), connectionStatus, currentSpeed, gpsData.Ignition)
 	} else {
-		colors.PrintError("Error marshaling GPS update: %v", err)
+		colors.PrintError("Error marshaling status update: %v", err)
 	}
 }
 

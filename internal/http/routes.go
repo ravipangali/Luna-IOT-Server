@@ -98,9 +98,19 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			gps.GET("", gpsController.GetGPSData)
 			gps.GET("/latest", gpsController.GetLatestGPSData)
 			gps.GET("/latest-valid", gpsController.GetLatestValidGPSData)
+
+			// NEW: Separate location and status data endpoints
+			gps.GET("/latest-location", gpsController.GetLatestLocationData)
+			gps.GET("/latest-status", gpsController.GetLatestStatusData)
+
 			gps.GET("/:imei", gpsController.GetGPSDataByIMEI)
 			gps.GET("/:imei/latest", gpsController.GetLatestGPSDataByIMEI)
 			gps.GET("/:imei/latest-valid", gpsController.GetLatestValidGPSDataByIMEI)
+
+			// NEW: Individual device location and status endpoints
+			gps.GET("/:imei/location", gpsController.GetLocationDataByIMEI)
+			gps.GET("/:imei/status", gpsController.GetStatusDataByIMEI)
+
 			gps.GET("/:imei/route", gpsController.GetGPSRoute)
 			gps.DELETE("/:id", middleware.AdminOnlyMiddleware(), gpsController.DeleteGPSData) // Admin only
 		}

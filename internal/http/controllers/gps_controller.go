@@ -346,3 +346,137 @@ func (gc *GPSController) GetLatestValidGPSData(c *gin.Context) {
 		"message": "Latest valid GPS data retrieved successfully",
 	})
 }
+
+// GetLatestLocationData returns the latest GPS data with valid coordinates for all devices
+// This is for location/positioning - coordinates are required
+func (gc *GPSController) GetLatestLocationData(c *gin.Context) {
+	var gpsData []models.GPSData
+
+	// Get latest location data for each IMEI - ONLY records with valid coordinates
+	if err := db.GetDB().Raw(`
+		SELECT DISTINCT ON (imei) *
+		FROM gps_data
+		WHERE deleted_at IS NULL 
+		AND latitude IS NOT NULL 
+		AND longitude IS NOT NULL
+		AND latitude != 0 
+		AND longitude != 0
+		ORDER BY imei, timestamp DESC
+	`).Preload("Device").Preload("Vehicle").Scan(&gpsData).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch latest location data",
+		})
+		return
+	}
+
+	colors.PrintInfo("📍 Retrieved latest location data for %d devices", len(gpsData))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gpsData,
+		"count":   len(gpsData),
+		"message": "Latest location data retrieved successfully",
+		"type":    "location",
+	})
+}
+
+// GetLatestStatusData returns the latest GPS data for device status information
+// This is for status display - coordinates are not required
+func (gc *GPSController) GetLatestStatusData(c *gin.Context) {
+	var gpsData []models.GPSData
+
+	// Get latest status data for each IMEI - regardless of coordinates
+	if err := db.GetDB().Raw(`
+		SELECT DISTINCT ON (imei) *
+		FROM gps_data
+		WHERE deleted_at IS NULL
+		ORDER BY imei, timestamp DESC
+	`).Preload("Device").Preload("Vehicle").Scan(&gpsData).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch latest status data",
+		})
+		return
+	}
+
+	colors.PrintInfo("📊 Retrieved latest status data for %d devices", len(gpsData))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gpsData,
+		"count":   len(gpsData),
+		"message": "Latest status data retrieved successfully",
+		"type":    "status",
+	})
+}
+
+// GetLocationDataByIMEI returns the latest location data for a specific device
+// This is for map positioning - will fallback through history to find valid coordinates
+func (gc *GPSController) GetLocationDataByIMEI(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid IMEI format",
+		})
+		return
+	}
+
+	var gpsData models.GPSData
+
+	// First try to get the latest GPS data with valid coordinates
+	if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 AND longitude != 0").
+		Preload("Device").
+		Preload("Vehicle").
+		Order("timestamp DESC").
+		First(&gpsData).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "No location data with valid coordinates found for this device",
+		})
+		return
+	}
+
+	colors.PrintInfo("📍 Retrieved location data for IMEI %s: lat=%.12f, lng=%.12f",
+		imei, *gpsData.Latitude, *gpsData.Longitude)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gpsData,
+		"message": "Location data retrieved successfully",
+		"type":    "location",
+	})
+}
+
+// GetStatusDataByIMEI returns the latest status data for a specific device
+// This is for device status information - coordinates are not required
+func (gc *GPSController) GetStatusDataByIMEI(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid IMEI format",
+		})
+		return
+	}
+
+	var gpsData models.GPSData
+	if err := db.GetDB().Where("imei = ?", imei).
+		Preload("Device").
+		Preload("Vehicle").
+		Order("timestamp DESC").
+		First(&gpsData).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "No status data found for this device",
+		})
+		return
+	}
+
+	colors.PrintInfo("📊 Retrieved status data for IMEI %s: ignition=%s, speed=%v, battery=%v",
+		imei, gpsData.Ignition, gpsData.Speed, gpsData.VoltageLevel)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gpsData,
+		"message": "Status data retrieved successfully",
+		"type":    "status",
+	})
+}
