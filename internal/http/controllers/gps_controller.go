@@ -159,23 +159,69 @@ func (gc *GPSController) GetLatestValidGPSDataByIMEI(c *gin.Context) {
 		return
 	}
 
+	colors.PrintInfo("📍 Searching for valid GPS data for IMEI: %s", imei)
+
 	var gpsData models.GPSData
 
-	// First try to get the latest GPS data with valid coordinates
-	if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL").
+	// ENHANCED: Try multiple fallback levels to find valid GPS data
+	// Level 1: Latest GPS data with non-null and non-zero coordinates
+	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != 0 AND longitude != 0").
 		Preload("Device").
 		Preload("Vehicle").
 		Order("timestamp DESC").
-		First(&gpsData).Error; err != nil {
+		First(&gpsData).Error
+
+	if err != nil {
+		colors.PrintWarning("📍 Level 1 failed for IMEI %s, trying Level 2 (non-null coordinates)...", imei)
+
+		// Level 2: Latest GPS data with non-null coordinates (allow zero values)
+		err = db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL").
+			Preload("Device").
+			Preload("Vehicle").
+			Order("timestamp DESC").
+			First(&gpsData).Error
+	}
+
+	if err != nil {
+		colors.PrintWarning("📍 Level 2 failed for IMEI %s, trying Level 3 (any GPS data)...", imei)
+
+		// Level 3: Any GPS data for this IMEI
+		err = db.GetDB().Where("imei = ?").
+			Preload("Device").
+			Preload("Vehicle").
+			Order("timestamp DESC").
+			First(&gpsData).Error
+	}
+
+	if err != nil {
+		colors.PrintError("📍 No GPS data found for IMEI %s: %v", imei, err)
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "No GPS data with valid coordinates found for this device",
+			"error":   "No GPS data found for this device",
+			"message": "This device has never sent GPS data to the server",
+			"imei":    imei,
 		})
 		return
 	}
 
+	// Check if we have valid coordinates
+	hasValidCoords := gpsData.Latitude != nil && gpsData.Longitude != nil
+	validCoordsMsg := "Found GPS data but coordinates are null/invalid"
+
+	if hasValidCoords {
+		lat := *gpsData.Latitude
+		lng := *gpsData.Longitude
+		if lat != 0 && lng != 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
+			validCoordsMsg = "Found GPS data with valid coordinates"
+		}
+	}
+
+	colors.PrintSuccess("📍 %s for IMEI %s: timestamp=%s", validCoordsMsg, imei, gpsData.Timestamp.Format("2006-01-02 15:04:05"))
+
 	c.JSON(http.StatusOK, gin.H{
-		"data":    gpsData,
-		"message": "Latest valid GPS data retrieved successfully",
+		"success":               true,
+		"data":                  gpsData,
+		"message":               "Latest GPS data retrieved successfully",
+		"has_valid_coordinates": hasValidCoords,
 	})
 }
 
