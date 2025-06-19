@@ -53,9 +53,6 @@ type LocationUpdate struct {
 	Timestamp    string   `json:"timestamp"`
 	ProtocolName string   `json:"protocol_name"`
 
-	// Map rotation support
-	Bearing *float64 `json:"bearing,omitempty"` // Course converted to bearing (0-360)
-
 	// Enhanced location validation
 	LocationValid bool `json:"location_valid"`
 	Accuracy      *int `json:"accuracy,omitempty"`
@@ -111,9 +108,6 @@ type GPSUpdate struct {
 	IsMoving         bool   `json:"is_moving"`
 	LastSeen         string `json:"last_seen"`
 	ConnectionStatus string `json:"connection_status"` // "connected", "stopped", "inactive"
-
-	// Map rotation support
-	Bearing *float64 `json:"bearing,omitempty"` // Course converted to bearing (0-360)
 
 	// Enhanced location validation
 	LocationValid bool `json:"location_valid"`
@@ -260,20 +254,6 @@ func (h *WebSocketHub) BroadcastLocationUpdate(gpsData *models.GPSData, vehicleN
 		return
 	}
 
-	// Convert course to bearing for map rotation (0-360 degrees)
-	var bearing *float64
-	if gpsData.Course != nil {
-		bearingValue := float64(*gpsData.Course)
-		// Ensure bearing is in 0-360 range
-		if bearingValue < 0 {
-			bearingValue += 360
-		}
-		if bearingValue >= 360 {
-			bearingValue = bearingValue - 360*float64(int(bearingValue/360))
-		}
-		bearing = &bearingValue
-	}
-
 	locationUpdate := LocationUpdate{
 		IMEI:          gpsData.IMEI,
 		VehicleName:   vehicleName,
@@ -286,7 +266,6 @@ func (h *WebSocketHub) BroadcastLocationUpdate(gpsData *models.GPSData, vehicleN
 		Altitude:      gpsData.Altitude,
 		Timestamp:     gpsData.Timestamp.Format("2006-01-02T15:04:05Z"),
 		ProtocolName:  gpsData.ProtocolName,
-		Bearing:       bearing,
 		LocationValid: locationValid,
 	}
 

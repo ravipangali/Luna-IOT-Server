@@ -127,12 +127,6 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ GPS coordinate precision enhanced")
 
-	// Add bearing column for map rotation support
-	if err := addBearingColumn(DB); err != nil {
-		return fmt.Errorf("failed to add bearing column: %v", err)
-	}
-	colors.PrintSuccess("✓ Bearing column added for map rotation")
-
 	colors.PrintHeader("DATABASE MIGRATIONS COMPLETED SUCCESSFULLY")
 	return nil
 }
@@ -149,38 +143,4 @@ func Close() error {
 		return err
 	}
 	return sqlDB.Close()
-}
-
-// addBearingColumn adds bearing column to gps_data table for map rotation support
-func addBearingColumn(db *gorm.DB) error {
-	colors.PrintInfo("Adding bearing column to gps_data table for map rotation support...")
-
-	// Check if bearing column already exists
-	var bearingColumnExists int64
-	db.Raw(`
-		SELECT COUNT(*) 
-		FROM information_schema.columns 
-		WHERE table_name = 'gps_data' 
-		AND column_name = 'bearing'
-	`).Count(&bearingColumnExists)
-
-	if bearingColumnExists == 0 {
-		colors.PrintInfo("Adding bearing column to gps_data table...")
-		if err := db.Exec("ALTER TABLE gps_data ADD COLUMN bearing DECIMAL(6,3)").Error; err != nil {
-			return err
-		}
-
-		// Add index on bearing column for performance
-		if err := db.Exec("CREATE INDEX idx_gps_data_bearing ON gps_data(bearing) WHERE bearing IS NOT NULL").Error; err != nil {
-			colors.PrintWarning("Could not create bearing index (might already exist): %v", err)
-		} else {
-			colors.PrintSuccess("Created index on bearing column")
-		}
-
-		colors.PrintSuccess("✓ Added bearing column to gps_data table")
-	} else {
-		colors.PrintInfo("Bearing column already exists in gps_data table")
-	}
-
-	return nil
 }

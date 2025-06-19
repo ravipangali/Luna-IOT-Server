@@ -379,16 +379,6 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 	if packet.Course != nil {
 		course := int(*packet.Course)
 		gpsData.Course = &course
-
-		// Calculate bearing for map rotation (convert course to 0-360 degrees)
-		bearing := float64(course)
-		if bearing < 0 {
-			bearing += 360
-		}
-		if bearing >= 360 {
-			bearing = bearing - 360*float64(int(bearing/360))
-		}
-		gpsData.Bearing = &bearing
 	}
 	if packet.Altitude != nil {
 		gpsData.Altitude = packet.Altitude
