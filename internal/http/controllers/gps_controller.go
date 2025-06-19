@@ -49,12 +49,14 @@ func (gc *GPSController) GetGPSData(c *gin.Context) {
 
 	if err := query.Order("timestamp DESC").Limit(limit).Offset(offset).Find(&gpsData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch GPS data",
+			"success": false,
+			"error":   "Failed to fetch GPS data",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    gpsData,
 		"count":   len(gpsData),
 		"page":    page,
@@ -96,12 +98,14 @@ func (gc *GPSController) GetGPSDataByIMEI(c *gin.Context) {
 
 	if err := query.Order("timestamp DESC").Limit(limit).Offset(offset).Find(&gpsData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch GPS data",
+			"success": false,
+			"error":   "Failed to fetch GPS data",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"success": true,
 		"data":    gpsData,
 		"count":   len(gpsData),
 		"page":    page,
