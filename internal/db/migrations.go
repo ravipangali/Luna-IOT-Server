@@ -288,8 +288,31 @@ func updateLatLongPrecision(db *gorm.DB) error {
 func ensureUserVehicleColumns(db *gorm.DB) error {
 	colors.PrintInfo("Ensuring user_vehicles table has all required permission columns...")
 
+	// First ensure the table has the primary key column
+	var idExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.columns 
+		WHERE table_name = 'user_vehicles' 
+		AND column_name = 'id'
+	`).Count(&idExists)
+
+	if idExists == 0 {
+		colors.PrintInfo("Adding primary key 'id' column to user_vehicles table...")
+		sql := "ALTER TABLE user_vehicles ADD COLUMN id SERIAL PRIMARY KEY"
+		if err := db.Exec(sql).Error; err != nil {
+			colors.PrintWarning("Failed to add id column: %v", err)
+		} else {
+			colors.PrintSuccess("Added primary key 'id' column to user_vehicles table")
+		}
+	} else {
+		colors.PrintInfo("Primary key 'id' column already exists in user_vehicles table")
+	}
+
 	// List of required columns and their types
 	requiredColumns := map[string]string{
+		"user_id":        "INTEGER NOT NULL",
+		"vehicle_id":     "VARCHAR(16) NOT NULL",
 		"all_access":     "BOOLEAN DEFAULT FALSE",
 		"live_tracking":  "BOOLEAN DEFAULT FALSE",
 		"history":        "BOOLEAN DEFAULT FALSE",
