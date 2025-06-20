@@ -83,6 +83,7 @@ func RunMigrations() error {
 			colors.PrintInfo("Dropping existing users table...")
 			DB.Migrator().DropTable(&models.User{})
 		}
+
 	}
 
 	// Create tables in the correct order
@@ -144,6 +145,12 @@ func RunMigrations() error {
 		return fmt.Errorf("failed to update GPS precision: %v", err)
 	}
 	colors.PrintSuccess("✓ GPS coordinate precision enhanced")
+
+	// Ensure user_vehicles table has all required permission columns
+	if err := ensureUserVehicleColumns(DB); err != nil {
+		return fmt.Errorf("failed to ensure user_vehicles table structure: %v", err)
+	}
+	colors.PrintSuccess("✓ User-Vehicle permissions table structure verified")
 
 	colors.PrintHeader("DATABASE MIGRATIONS COMPLETED SUCCESSFULLY")
 	return nil

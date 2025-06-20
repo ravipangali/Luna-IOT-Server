@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
 
@@ -38,6 +39,12 @@ func MigrateDB(db *gorm.DB) error {
 	// Update latitude and longitude precision
 	if err := updateLatLongPrecision(db); err != nil {
 		colors.PrintError("Failed to update latitude and longitude precision: %v", err)
+		return err
+	}
+
+	// Ensure user_vehicles table has all required permission columns
+	if err := ensureUserVehicleColumns(db); err != nil {
+		colors.PrintError("Failed to ensure user_vehicles table: %v", err)
 		return err
 	}
 
@@ -266,6 +273,70 @@ func updateLatLongPrecision(db *gorm.DB) error {
 		colors.PrintWarning("Failed to update longitude precision: %v", err)
 	} else {
 		colors.PrintSuccess("✓ Updated longitude column to NUMERIC(15,12)")
+	}
+
+	return nil
+}
+
+// ensureUserVehicleColumns ensures that the user_vehicles table has all required permission columns
+func ensureUserVehicleColumns(db *gorm.DB) error {
+	colors.PrintInfo("Ensuring user_vehicles table has all required permission columns...")
+
+	// List of required columns and their types
+	requiredColumns := map[string]string{
+		"all_access":     "BOOLEAN DEFAULT FALSE",
+		"live_tracking":  "BOOLEAN DEFAULT FALSE",
+		"history":        "BOOLEAN DEFAULT FALSE",
+		"report":         "BOOLEAN DEFAULT FALSE",
+		"vehicle_edit":   "BOOLEAN DEFAULT FALSE",
+		"notification":   "BOOLEAN DEFAULT FALSE",
+		"share_tracking": "BOOLEAN DEFAULT FALSE",
+		"is_main_user":   "BOOLEAN DEFAULT FALSE",
+		"granted_by":     "INTEGER",
+		"granted_at":     "TIMESTAMP",
+		"expires_at":     "TIMESTAMP",
+		"is_active":      "BOOLEAN DEFAULT TRUE",
+		"notes":          "TEXT",
+	}
+
+	for columnName, columnType := range requiredColumns {
+		// Check if column exists
+		var columnExists int64
+		db.Raw(`
+			SELECT COUNT(*) 
+			FROM information_schema.columns 
+			WHERE table_name = 'user_vehicles' 
+			AND column_name = ?
+		`, columnName).Count(&columnExists)
+
+		if columnExists == 0 {
+			colors.PrintInfo("Adding column '%s' to user_vehicles table...", columnName)
+			sql := fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s %s", columnName, columnType)
+			if err := db.Exec(sql).Error; err != nil {
+				colors.PrintWarning("Failed to add column '%s': %v", columnName, err)
+			} else {
+				colors.PrintSuccess("Added column '%s' to user_vehicles table", columnName)
+			}
+		} else {
+			colors.PrintInfo("Column '%s' already exists in user_vehicles table", columnName)
+		}
+	}
+
+	// Add indexes for better performance
+	indexes := map[string]string{
+		"idx_user_vehicles_user_id":    "CREATE INDEX IF NOT EXISTS idx_user_vehicles_user_id ON user_vehicles(user_id)",
+		"idx_user_vehicles_vehicle_id": "CREATE INDEX IF NOT EXISTS idx_user_vehicles_vehicle_id ON user_vehicles(vehicle_id)",
+		"idx_user_vehicles_granted_by": "CREATE INDEX IF NOT EXISTS idx_user_vehicles_granted_by ON user_vehicles(granted_by)",
+		"idx_user_vehicles_active":     "CREATE INDEX IF NOT EXISTS idx_user_vehicles_active ON user_vehicles(is_active)",
+	}
+
+	for indexName, indexSQL := range indexes {
+		colors.PrintInfo("Creating index '%s'...", indexName)
+		if err := db.Exec(indexSQL).Error; err != nil {
+			colors.PrintWarning("Failed to create index '%s': %v", indexName, err)
+		} else {
+			colors.PrintSuccess("Created index '%s'", indexName)
+		}
 	}
 
 	return nil
