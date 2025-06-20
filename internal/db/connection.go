@@ -42,61 +42,25 @@ func Initialize() error {
 func RunMigrations() error {
 	colors.PrintSubHeader("Running Database Migrations")
 
-	// IMPORTANT: Force reset all tables to fix schema issues
-	colors.PrintWarning("Forcefully resetting database schema to fix persistent issues...")
-
-	// Drop all tables in the correct order to avoid foreign key constraint errors
-	DB.Exec("DROP TABLE IF EXISTS gps_data CASCADE")
-	DB.Exec("DROP TABLE IF EXISTS user_vehicles CASCADE")
-	DB.Exec("DROP TABLE IF EXISTS vehicles CASCADE")
-	DB.Exec("DROP TABLE IF EXISTS devices CASCADE")
-	DB.Exec("DROP TABLE IF EXISTS device_models CASCADE")
-	DB.Exec("DROP TABLE IF EXISTS users CASCADE")
-
-	colors.PrintSuccess("Database tables dropped successfully")
-
-	// Create tables in the correct order
-	colors.PrintInfo("Creating database tables from scratch...")
-
-	// Create base tables first (no foreign keys)
-	err := DB.AutoMigrate(&models.User{})
+	// Use AutoMigrate for all models. It will create tables, add missing columns,
+	// and change column types, but it will NOT delete data.
+	colors.PrintInfo("Running Auto-Migrations for all models...")
+	err := DB.AutoMigrate(
+		&models.User{},
+		&models.DeviceModel{},
+		&models.Device{},
+		&models.Vehicle{},
+		&models.GPSData{},
+		&models.UserVehicle{},
+	)
 	if err != nil {
-		return fmt.Errorf("user table migration failed: %v", err)
+		return fmt.Errorf("auto-migration failed: %v", err)
 	}
-	colors.PrintSuccess("✓ Users table ready")
+	colors.PrintSuccess("✓ All models migrated successfully")
 
-	err = DB.AutoMigrate(&models.DeviceModel{})
-	if err != nil {
-		return fmt.Errorf("device_model table migration failed: %v", err)
-	}
-	colors.PrintSuccess("✓ Device Models table ready")
-
-	err = DB.AutoMigrate(&models.Device{})
-	if err != nil {
-		return fmt.Errorf("device table migration failed: %v", err)
-	}
-	colors.PrintSuccess("✓ Devices table ready")
-
-	// Create tables with foreign keys
-	err = DB.AutoMigrate(&models.Vehicle{})
-	if err != nil {
-		return fmt.Errorf("vehicle table migration failed: %v", err)
-	}
-	colors.PrintSuccess("✓ Vehicles table ready")
-
-	// Create GPS data table
-	err = DB.AutoMigrate(&models.GPSData{})
-	if err != nil {
-		return fmt.Errorf("gps_data table migration failed: %v", err)
-	}
-	colors.PrintSuccess("✓ GPS data table ready")
-
-	// Create user-vehicle relationship table
-	err = DB.AutoMigrate(&models.UserVehicle{})
-	if err != nil {
-		return fmt.Errorf("user_vehicle table migration failed: %v", err)
-	}
-	colors.PrintSuccess("✓ User-Vehicle relationship table ready")
+	// The functions below are for manual migrations that might not be fully
+	// covered by AutoMigrate, such as changing column types or fixing constraints.
+	// They will be executed safely without dropping tables.
 
 	// Update the image column in the users table to TEXT type
 	if err := updateImageColumnToText(DB); err != nil {
@@ -116,7 +80,8 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ GPS coordinate precision enhanced")
 
-	// Ensure user_vehicles table has all required permission columns
+	// The ensureUserVehicleColumns function now uses AutoMigrate, so this serves as a redundant check.
+	// This is safe to keep.
 	if err := ensureUserVehicleColumns(DB); err != nil {
 		return fmt.Errorf("failed to ensure user_vehicles table structure: %v", err)
 	}
