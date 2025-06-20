@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
@@ -367,6 +368,13 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 		grantedBy = mainUserID // Fallback to main user if no current user
 	}
 
+	// Verify the grantedBy user exists (for foreign key constraint)
+	var grantedByUser models.User
+	if err := db.GetDB().First(&grantedByUser, grantedBy).Error; err != nil {
+		colors.PrintWarning("GrantedBy user with ID %d not found, using main user", grantedBy)
+		grantedBy = mainUserID
+	}
+
 	// Start transaction
 	tx := db.GetDB().Begin()
 	defer func() {
@@ -386,8 +394,27 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 		return
 	}
 
-	// Create main user assignment
-	mainUserAssignment := models.CreateMainUserAssignment(mainUserID, vehicle.IMEI, grantedBy)
+	// Create main user assignment - create the struct manually to avoid potential issues
+	mainUserAssignment := &models.UserVehicle{
+		UserID:        mainUserID,
+		VehicleID:     vehicle.IMEI,
+		AllAccess:     true,
+		LiveTracking:  true,
+		History:       true,
+		Report:        true,
+		VehicleEdit:   true,
+		Notification:  true,
+		ShareTracking: true,
+		IsMainUser:    true,
+		GrantedBy:     grantedBy,
+		GrantedAt:     time.Now(),
+		IsActive:      true,
+		Notes:         "Main user (Vehicle Owner)",
+	}
+
+	colors.PrintInfo("Creating user-vehicle assignment: UserID=%d, VehicleID=%s, GrantedBy=%d",
+		mainUserAssignment.UserID, mainUserAssignment.VehicleID, mainUserAssignment.GrantedBy)
+
 	if err := tx.Create(mainUserAssignment).Error; err != nil {
 		tx.Rollback()
 		colors.PrintError("Failed to assign main user to vehicle: %v", err)

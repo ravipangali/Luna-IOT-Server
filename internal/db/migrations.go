@@ -48,6 +48,12 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
+	// Fix user_vehicles foreign key constraints
+	if err := fixUserVehicleConstraints(db); err != nil {
+		colors.PrintError("Failed to fix user_vehicles constraints: %v", err)
+		return err
+	}
+
 	colors.PrintSuccess("Database migrations completed successfully")
 	return nil
 }
@@ -339,5 +345,92 @@ func ensureUserVehicleColumns(db *gorm.DB) error {
 		}
 	}
 
+	return nil
+}
+
+// fixUserVehicleConstraints ensures proper foreign key constraints for user_vehicles table
+func fixUserVehicleConstraints(db *gorm.DB) error {
+	colors.PrintInfo("Fixing user_vehicles foreign key constraints...")
+
+	// Check if user_vehicles table exists
+	if !db.Migrator().HasTable("user_vehicles") {
+		colors.PrintInfo("user_vehicles table does not exist, skipping constraint fix")
+		return nil
+	}
+
+	// Remove problematic foreign key constraints and recreate them properly
+	constraints := []string{
+		"fk_user_vehicles_user",
+		"fk_user_vehicles_vehicle",
+		"fk_user_vehicles_granted_by_user",
+		"user_vehicles_user_id_fkey",
+		"user_vehicles_vehicle_id_fkey",
+		"user_vehicles_granted_by_fkey",
+	}
+
+	for _, constraint := range constraints {
+		// Check if constraint exists
+		var exists int64
+		db.Raw(`
+			SELECT COUNT(*) 
+			FROM information_schema.table_constraints 
+			WHERE constraint_name = ? 
+			AND table_name = 'user_vehicles'
+		`, constraint).Count(&exists)
+
+		if exists > 0 {
+			colors.PrintInfo("Removing constraint '%s' from user_vehicles table", constraint)
+			db.Exec("ALTER TABLE user_vehicles DROP CONSTRAINT IF EXISTS " + constraint)
+		}
+	}
+
+	// Add proper foreign key constraints with better error handling
+	colors.PrintInfo("Adding proper foreign key constraints to user_vehicles table")
+
+	// Check if users table exists before adding constraint
+	if db.Migrator().HasTable("users") {
+		// User ID foreign key
+		if err := db.Exec(`
+			ALTER TABLE user_vehicles 
+			ADD CONSTRAINT fk_user_vehicles_user 
+			FOREIGN KEY (user_id) REFERENCES users(id) 
+			ON UPDATE CASCADE ON DELETE CASCADE
+		`).Error; err != nil {
+			colors.PrintWarning("Failed to add user foreign key constraint: %v", err)
+		} else {
+			colors.PrintSuccess("Added user foreign key constraint")
+		}
+	}
+
+	// Check if vehicles table exists before adding constraint
+	if db.Migrator().HasTable("vehicles") {
+		// Vehicle ID foreign key (references IMEI)
+		if err := db.Exec(`
+			ALTER TABLE user_vehicles 
+			ADD CONSTRAINT fk_user_vehicles_vehicle 
+			FOREIGN KEY (vehicle_id) REFERENCES vehicles(imei) 
+			ON UPDATE CASCADE ON DELETE CASCADE
+		`).Error; err != nil {
+			colors.PrintWarning("Failed to add vehicle foreign key constraint: %v", err)
+		} else {
+			colors.PrintSuccess("Added vehicle foreign key constraint")
+		}
+	}
+
+	// Granted by foreign key (nullable, allows NULL)
+	if db.Migrator().HasTable("users") {
+		if err := db.Exec(`
+			ALTER TABLE user_vehicles 
+			ADD CONSTRAINT fk_user_vehicles_granted_by 
+			FOREIGN KEY (granted_by) REFERENCES users(id) 
+			ON UPDATE CASCADE ON DELETE SET NULL
+		`).Error; err != nil {
+			colors.PrintWarning("Failed to add granted_by foreign key constraint: %v", err)
+		} else {
+			colors.PrintSuccess("Added granted_by foreign key constraint")
+		}
+	}
+
+	colors.PrintSuccess("✓ user_vehicles foreign key constraints fixed")
 	return nil
 }
