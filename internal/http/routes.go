@@ -153,6 +153,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			userVehicles.POST("/assign", middleware.AdminOnlyMiddleware(), userVehicleController.AssignVehicleToUser)
 			userVehicles.POST("/bulk-assign", middleware.AdminOnlyMiddleware(), userVehicleController.BulkAssignVehiclesToUser)
 			userVehicles.PUT("/:id/permissions", middleware.AdminOnlyMiddleware(), userVehicleController.UpdateVehiclePermissions)
+			userVehicles.PUT("/vehicle/:vehicle_id/set-main-user", middleware.AdminOnlyMiddleware(), userVehicleController.SetMainUser)
 			userVehicles.DELETE("/:id", middleware.AdminOnlyMiddleware(), userVehicleController.RevokeVehicleAccess)
 
 			// View routes (users can view their own access, admins can view all)

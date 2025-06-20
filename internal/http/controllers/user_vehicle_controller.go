@@ -382,3 +382,87 @@ func (uvc *UserVehicleController) GetVehicleUserAccess(c *gin.Context) {
 		"message": "Vehicle user access retrieved successfully",
 	})
 }
+
+// SetMainUserRequest represents the request to set a main user
+type SetMainUserRequest struct {
+	UserAccessID uint `json:"user_access_id" binding:"required"`
+}
+
+// SetMainUser sets a user as the main user for a vehicle
+func (uvc *UserVehicleController) SetMainUser(c *gin.Context) {
+	vehicleID := c.Param("vehicle_id")
+	if len(vehicleID) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid vehicle ID (IMEI)",
+		})
+		return
+	}
+
+	var req SetMainUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request data",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Start a transaction
+	tx := db.GetDB().Begin()
+
+	// First, remove main user status from all users for this vehicle
+	if err := tx.Model(&models.UserVehicle{}).Where("vehicle_id = ?", vehicleID).Update("is_main_user", false).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to update main user status",
+		})
+		return
+	}
+
+	// Now, set the new main user
+	var userVehicle models.UserVehicle
+	if err := tx.First(&userVehicle, req.UserAccessID).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "User access record not found",
+		})
+		return
+	}
+
+	if userVehicle.VehicleID != vehicleID {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "User access record does not belong to this vehicle",
+		})
+		return
+	}
+
+	userVehicle.IsMainUser = true
+	if err := tx.Save(&userVehicle).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to set new main user",
+		})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Transaction failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Main user updated successfully",
+		"data":    userVehicle,
+	})
+}
