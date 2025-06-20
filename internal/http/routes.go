@@ -42,6 +42,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		{
 			auth.POST("/login", authController.Login)
 			auth.POST("/register", authController.Register)
+			auth.POST("/send-otp", authController.SendOTP)
 		}
 
 		// Protected authentication routes (require auth)

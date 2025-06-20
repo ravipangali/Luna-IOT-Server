@@ -1,8 +1,15 @@
 package controllers
 
 import (
+	"fmt"
+	"log"
+	"luna_iot_server/config"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
@@ -10,6 +17,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+)
+
+// OTPData stores the generated OTP and its expiration time
+type OTPData struct {
+	OTP       string
+	ExpiresAt time.Time
+}
+
+// In-memory store for OTPs, mapping phone numbers to OTP data
+var (
+	otpStore = make(map[string]OTPData)
+	otpMutex = &sync.Mutex{}
 )
 
 // AuthController handles authentication related HTTP requests
@@ -34,6 +53,7 @@ type RegisterRequest struct {
 	Password string          `json:"password" binding:"required,min=6"`
 	Role     models.UserRole `json:"role,omitempty"` // Optional, defaults to client (1)
 	Image    string          `json:"image,omitempty"`
+	OTP      string          `json:"otp,omitempty" binding:"required,len=6"`
 }
 
 // AuthResponse represents the authentication response
@@ -138,6 +158,21 @@ func (ac *AuthController) Register(c *gin.Context) {
 
 	colors.PrintInfo("Registration attempt for email: %s", req.Email)
 
+	// Verify OTP
+	otpMutex.Lock()
+	otpData, ok := otpStore[req.Phone]
+	otpMutex.Unlock()
+
+	if !ok || otpData.OTP != req.OTP || time.Now().After(otpData.ExpiresAt) {
+		colors.PrintWarning("Registration failed: Invalid or expired OTP for phone %s", req.Phone)
+		c.JSON(http.StatusUnauthorized, AuthResponse{
+			Success: false,
+			Error:   "Invalid or expired OTP",
+			Message: "The OTP you entered is incorrect or has expired. Please try again.",
+		})
+		return
+	}
+
 	// Check if email already exists
 	var existingUser models.User
 	if err := db.GetDB().Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
@@ -227,6 +262,103 @@ func (ac *AuthController) Register(c *gin.Context) {
 		Token:   user.Token,
 		User:    user.ToSafeUser(),
 	})
+
+	// Clean up OTP from store after successful registration
+	otpMutex.Lock()
+	delete(otpStore, req.Phone)
+	otpMutex.Unlock()
+}
+
+// SendOTPRequest represents the request body for sending an OTP
+type SendOTPRequest struct {
+	Phone string `json:"phone" binding:"required,min=10,max=15"`
+}
+
+// SendOTP generates and sends an OTP to the user's phone
+func (ac *AuthController) SendOTP(c *gin.Context) {
+	var req SendOTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, AuthResponse{
+			Success: false,
+			Error:   "Invalid request format",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Check if phone number is already registered
+	var existingUser models.User
+	if err := db.GetDB().Where("phone = ?", req.Phone).First(&existingUser).Error; err == nil {
+		colors.PrintWarning("OTP request for already registered phone: %s", req.Phone)
+		c.JSON(http.StatusConflict, AuthResponse{
+			Success: false,
+			Error:   "Phone number already registered",
+			Message: "A user with this phone number already exists. Please login.",
+		})
+		return
+	}
+
+	// Generate 6-digit OTP
+	otp := fmt.Sprintf("%06d", rand.Intn(1000000))
+	expiresAt := time.Now().Add(5 * time.Minute) // OTP valid for 5 minutes
+
+	// Store OTP
+	otpMutex.Lock()
+	otpStore[req.Phone] = OTPData{OTP: otp, ExpiresAt: expiresAt}
+	otpMutex.Unlock()
+
+	colors.PrintInfo("Generated OTP %s for phone %s. Expires at %s", otp, req.Phone, expiresAt.Format(time.RFC3339))
+
+	// Send SMS
+	if err := sendSMS(req.Phone, fmt.Sprintf("Your Luna IOT verification code is: %s. It is valid for 5 minutes.", otp)); err != nil {
+		colors.PrintError("Failed to send SMS to %s: %v", req.Phone, err)
+		// Don't fail the request to the user, but log the error.
+		// In a production environment, you might want to handle this differently.
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "OTP sent successfully to your phone number.",
+	})
+}
+
+// sendSMS is a helper function to call the SMS provider API
+func sendSMS(contact, message string) error {
+	smsCfg := config.GetSMSConfig()
+	if smsCfg.APIKey == "" {
+		log.Println("SMS_API_KEY is not set. Skipping SMS.")
+		return nil // Or return an error if SMS is critical
+	}
+
+	// URL encode the message
+	encodedMsg := url.QueryEscape(message)
+
+	// Construct the URL
+	apiURL := fmt.Sprintf("%s?key=%s&campaign=%s&routeid=%s&type=text&contacts=%s&senderid=%s&msg=%s",
+		smsCfg.APIURL,
+		smsCfg.APIKey,
+		smsCfg.CampaignID,
+		smsCfg.RouteID,
+		contact,
+		smsCfg.SenderID,
+		encodedMsg,
+	)
+
+	colors.PrintDebug("Sending SMS via URL: %s", apiURL)
+
+	// Make the GET request
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to make HTTP request to SMS API: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("SMS API returned non-200 status code: %d", resp.StatusCode)
+	}
+
+	colors.PrintSuccess("Successfully sent SMS to %s", contact)
+	return nil
 }
 
 // Logout invalidates the user's token
