@@ -164,17 +164,11 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	}
 
 	var vehicle models.Vehicle
-	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err != nil {
+	if err := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Vehicle not found",
 		})
 		return
-	}
-
-	// Load associated device
-	var device models.Device
-	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
-		vehicle.Device = device
 	}
 
 	// Load user access information with user details
@@ -229,17 +223,11 @@ func (vc *VehicleController) GetVehicleByRegNo(c *gin.Context) {
 	regNo := c.Param("reg_no")
 
 	var vehicle models.Vehicle
-	if err := db.GetDB().Where("reg_no = ?", regNo).First(&vehicle).Error; err != nil {
+	if err := db.GetDB().Preload("Device").Where("reg_no = ?", regNo).First(&vehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Vehicle not found",
 		})
 		return
-	}
-
-	// Manually load device information
-	var device models.Device
-	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
-		vehicle.Device = device
 	}
 
 	c.JSON(http.StatusOK, gin.H{
