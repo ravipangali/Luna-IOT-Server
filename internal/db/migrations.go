@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
-	"strings"
 
 	"gorm.io/gorm"
 )
@@ -287,88 +286,16 @@ func updateLatLongPrecision(db *gorm.DB) error {
 
 // ensureUserVehicleColumns ensures that the user_vehicles table has all required permission columns
 func ensureUserVehicleColumns(db *gorm.DB) error {
-	colors.PrintInfo("Ensuring user_vehicles table has all required permission columns...")
+	colors.PrintInfo("Ensuring user_vehicles table has all required permission columns via AutoMigrate...")
 
-	// First check if the table exists
-	if !db.Migrator().HasTable("user_vehicles") {
-		colors.PrintWarning("user_vehicles table does not exist, it will be created by AutoMigrate")
-		return nil
+	// AutoMigrate will create the table if it doesn't exist,
+	// and add any missing columns, indexes, or change column types.
+	if err := db.AutoMigrate(&models.UserVehicle{}); err != nil {
+		colors.PrintError("Failed to AutoMigrate user_vehicles table: %v", err)
+		return fmt.Errorf("failed to auto-migrate user_vehicles table: %v", err)
 	}
 
-	// Check for multiple primary key constraint issue
-	var constraintCount int64
-	db.Raw(`
-		SELECT COUNT(*) 
-		FROM information_schema.table_constraints 
-		WHERE table_name = 'user_vehicles' 
-		AND constraint_type = 'PRIMARY KEY'
-	`).Count(&constraintCount)
-
-	if constraintCount > 1 {
-		colors.PrintWarning("Multiple primary key constraints detected on user_vehicles table (%d), this should be fixed during table recreation", constraintCount)
-		return nil
-	}
-
-	// Check if id column exists
-	var idExists bool
-	if err := db.Exec("SELECT id FROM user_vehicles LIMIT 1").Error; err != nil {
-		if strings.Contains(err.Error(), "does not exist") {
-			idExists = false
-		} else {
-			// Some other error occurred
-			return err
-		}
-	} else {
-		idExists = true
-	}
-
-	// If id column doesn't exist, we'll skip further operations as the table will be recreated
-	if !idExists {
-		colors.PrintWarning("Missing primary key 'id' column in user_vehicles table, this should be fixed during table recreation")
-		return nil
-	}
-
-	// Check for required permission columns
-	requiredColumns := []string{
-		"all_access", "live_tracking", "history", "report", "vehicle_edit",
-		"notification", "share_tracking", "is_main_user", "is_active",
-		"created_at", "updated_at", "deleted_at",
-	}
-
-	for _, column := range requiredColumns {
-		var columnExists bool
-		if err := db.Exec(fmt.Sprintf("SELECT %s FROM user_vehicles LIMIT 1", column)).Error; err != nil {
-			if strings.Contains(err.Error(), "does not exist") {
-				columnExists = false
-			} else {
-				// Some other error occurred
-				return err
-			}
-		} else {
-			columnExists = true
-		}
-
-		if !columnExists {
-			colors.PrintInfo("Adding '%s' column to user_vehicles table...", column)
-			var alterCmd string
-			switch column {
-			case "all_access", "live_tracking", "history", "report", "vehicle_edit", "notification", "share_tracking", "is_main_user", "is_active":
-				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s BOOLEAN DEFAULT FALSE", column)
-			case "created_at", "updated_at":
-				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s TIMESTAMP DEFAULT CURRENT_TIMESTAMP", column)
-			case "deleted_at":
-				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s TIMESTAMP NULL", column)
-			default:
-				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s VARCHAR(255)", column)
-			}
-
-			if err := db.Exec(alterCmd).Error; err != nil {
-				return fmt.Errorf("failed to add column %s: %v", column, err)
-			}
-			colors.PrintSuccess("✓ Added '%s' column", column)
-		}
-	}
-
+	colors.PrintSuccess("✓ User-Vehicle permissions table structure verified and synchronized")
 	return nil
 }
 
