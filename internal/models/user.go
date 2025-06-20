@@ -31,6 +31,10 @@ type User struct {
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+
+	// Relationships - many-to-many with vehicles through UserVehicle
+	VehicleAccess []UserVehicle `json:"vehicle_access,omitempty" gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Vehicles      []Vehicle     `json:"vehicles,omitempty" gorm:"many2many:user_vehicles;foreignKey:ID;joinForeignKey:UserID;References:IMEI;joinReferences:VehicleID"`
 }
 
 // TableName specifies the table name for User model
@@ -113,14 +117,65 @@ func (u *User) GetRoleString() string {
 // ToSafeUser returns user data without sensitive information
 func (u *User) ToSafeUser() map[string]interface{} {
 	return map[string]interface{}{
-		"id":         u.ID,
-		"name":       u.Name,
-		"phone":      u.Phone,
-		"email":      u.Email,
-		"role":       u.Role,
-		"role_name":  u.GetRoleString(),
-		"image":      u.Image,
-		"created_at": u.CreatedAt,
-		"updated_at": u.UpdatedAt,
+		"id":             u.ID,
+		"name":           u.Name,
+		"phone":          u.Phone,
+		"email":          u.Email,
+		"role":           u.Role,
+		"role_name":      u.GetRoleString(),
+		"image":          u.Image,
+		"vehicle_access": u.VehicleAccess,
+		"vehicles":       u.Vehicles,
+		"created_at":     u.CreatedAt,
+		"updated_at":     u.UpdatedAt,
 	}
+}
+
+// HasVehiclePermission checks if user has a specific permission for a vehicle
+func (u *User) HasVehiclePermission(vehicleID string, permission Permission) bool {
+	// Admin users have all permissions
+	if u.Role == UserRoleAdmin {
+		return true
+	}
+
+	for _, access := range u.VehicleAccess {
+		if access.VehicleID == vehicleID {
+			return access.HasPermission(permission)
+		}
+	}
+	return false
+}
+
+// GetVehiclePermissions returns all permissions for a specific vehicle
+func (u *User) GetVehiclePermissions(vehicleID string) []Permission {
+	// Admin users have all permissions
+	if u.Role == UserRoleAdmin {
+		return []Permission{
+			PermissionAllAccess,
+			PermissionLiveTracking,
+			PermissionHistory,
+			PermissionReport,
+			PermissionVehicleEdit,
+			PermissionNotification,
+			PermissionShareTracking,
+		}
+	}
+
+	for _, access := range u.VehicleAccess {
+		if access.VehicleID == vehicleID {
+			return access.GetPermissions()
+		}
+	}
+	return []Permission{}
+}
+
+// GetAccessibleVehicles returns all vehicles the user has access to
+func (u *User) GetAccessibleVehicles() []string {
+	var vehicleIDs []string
+	for _, access := range u.VehicleAccess {
+		if access.IsActive && !access.IsExpired() {
+			vehicleIDs = append(vehicleIDs, access.VehicleID)
+		}
+	}
+	return vehicleIDs
 }

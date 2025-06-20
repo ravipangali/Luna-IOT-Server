@@ -25,7 +25,15 @@ func NewUserController() *UserController {
 func (uc *UserController) GetUsers(c *gin.Context) {
 	var users []models.User
 
-	if err := db.GetDB().Find(&users).Error; err != nil {
+	// Check if vehicle relationships should be loaded
+	includeVehicles := c.Query("include_vehicles") == "true"
+
+	query := db.GetDB()
+	if includeVehicles {
+		query = query.Preload("VehicleAccess").Preload("VehicleAccess.Vehicle").Preload("Vehicles")
+	}
+
+	if err := query.Find(&users).Error; err != nil {
 		colors.PrintError("Failed to fetch users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch users",
@@ -56,8 +64,16 @@ func (uc *UserController) GetUser(c *gin.Context) {
 		return
 	}
 
+	// Check if vehicle relationships should be loaded
+	includeVehicles := c.Query("include_vehicles") == "true"
+
 	var user models.User
-	if err := db.GetDB().First(&user, uint(id)).Error; err != nil {
+	query := db.GetDB()
+	if includeVehicles {
+		query = query.Preload("VehicleAccess").Preload("VehicleAccess.Vehicle").Preload("Vehicles")
+	}
+
+	if err := query.First(&user, uint(id)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "User not found",
 		})

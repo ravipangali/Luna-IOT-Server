@@ -19,6 +19,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	userController := controllers.NewUserController()
 	deviceController := controllers.NewDeviceController()
 	vehicleController := controllers.NewVehicleController()
+	userVehicleController := controllers.NewUserVehicleController()
 	gpsController := controllers.NewGPSController()
 
 	// Use shared control controller if provided, otherwise create new one
@@ -130,6 +131,21 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			control.POST("/quick-connect/:id", controlController.QuickConnectOil)
 			control.POST("/quick-cut-imei/:imei", controlController.QuickCutOil)
 			control.POST("/quick-connect-imei/:imei", controlController.QuickConnectOil)
+		}
+
+		// User-Vehicle relationship routes (admin only for assignment, users can view their own access)
+		userVehicles := v1.Group("/user-vehicles")
+		userVehicles.Use(middleware.AuthMiddleware())
+		{
+			// Admin only routes for managing assignments
+			userVehicles.POST("/assign", middleware.AdminOnlyMiddleware(), userVehicleController.AssignVehicleToUser)
+			userVehicles.POST("/bulk-assign", middleware.AdminOnlyMiddleware(), userVehicleController.BulkAssignVehiclesToUser)
+			userVehicles.PUT("/:id/permissions", middleware.AdminOnlyMiddleware(), userVehicleController.UpdateVehiclePermissions)
+			userVehicles.DELETE("/:id", middleware.AdminOnlyMiddleware(), userVehicleController.RevokeVehicleAccess)
+
+			// View routes (users can view their own access, admins can view all)
+			userVehicles.GET("/user/:user_id", userVehicleController.GetUserVehicleAccess)       // Will be restricted by middleware
+			userVehicles.GET("/vehicle/:vehicle_id", userVehicleController.GetVehicleUserAccess) // Will be restricted by middleware
 		}
 	}
 

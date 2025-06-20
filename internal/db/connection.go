@@ -64,6 +64,11 @@ func RunMigrations() error {
 			DB.Migrator().DropTable(&models.GPSData{})
 		}
 
+		if DB.Migrator().HasTable(&models.UserVehicle{}) {
+			colors.PrintInfo("Dropping existing user_vehicles table...")
+			DB.Migrator().DropTable(&models.UserVehicle{})
+		}
+
 		if DB.Migrator().HasTable(&models.Vehicle{}) {
 			colors.PrintInfo("Dropping existing vehicles table...")
 			DB.Migrator().DropTable(&models.Vehicle{})
@@ -102,6 +107,13 @@ func RunMigrations() error {
 		return fmt.Errorf("vehicle table migration failed: %v", err)
 	}
 	colors.PrintSuccess("✓ Vehicles table ready")
+
+	// Create user-vehicle relationship table
+	err = DB.AutoMigrate(&models.UserVehicle{})
+	if err != nil {
+		return fmt.Errorf("user_vehicle table migration failed: %v", err)
+	}
+	colors.PrintSuccess("✓ User-Vehicle relationship table ready")
 
 	err = DB.AutoMigrate(&models.GPSData{})
 	if err != nil {

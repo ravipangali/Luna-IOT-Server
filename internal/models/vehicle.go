@@ -34,6 +34,10 @@ type Vehicle struct {
 	// Relationship - Reference device by IMEI but no foreign key constraint
 	// This allows devices to be created independently
 	Device Device `json:"device,omitempty" gorm:"-"`
+
+	// User relationships - many-to-many with users through UserVehicle
+	UserAccess []UserVehicle `json:"user_access,omitempty" gorm:"foreignKey:VehicleID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Users      []User        `json:"users,omitempty" gorm:"many2many:user_vehicles;foreignKey:IMEI;joinForeignKey:VehicleID;References:ID;joinReferences:UserID"`
 }
 
 // TableName specifies the table name for Vehicle model
@@ -63,4 +67,35 @@ func (v *Vehicle) LoadDevice(db *gorm.DB) error {
 
 	v.Device = device
 	return nil
+}
+
+// GetAuthorizedUsers returns all users who have access to this vehicle
+func (v *Vehicle) GetAuthorizedUsers() []uint {
+	var userIDs []uint
+	for _, access := range v.UserAccess {
+		if access.IsActive && !access.IsExpired() {
+			userIDs = append(userIDs, access.UserID)
+		}
+	}
+	return userIDs
+}
+
+// HasUserAccess checks if a user has any access to this vehicle
+func (v *Vehicle) HasUserAccess(userID uint) bool {
+	for _, access := range v.UserAccess {
+		if access.UserID == userID && access.IsActive && !access.IsExpired() {
+			return true
+		}
+	}
+	return false
+}
+
+// GetUserPermissions returns the permissions a specific user has for this vehicle
+func (v *Vehicle) GetUserPermissions(userID uint) []Permission {
+	for _, access := range v.UserAccess {
+		if access.UserID == userID && access.IsActive && !access.IsExpired() {
+			return access.GetPermissions()
+		}
+	}
+	return []Permission{}
 }
