@@ -21,7 +21,7 @@ const (
 
 // UserVehicle represents the many-to-many relationship between users and vehicles with permissions
 type UserVehicle struct {
-	ID        uint   `json:"id" gorm:"primarykey"`
+	ID        uint   `json:"id" gorm:"primarykey;autoIncrement"`
 	UserID    uint   `json:"user_id" gorm:"not null;index"`
 	VehicleID string `json:"vehicle_id" gorm:"not null;size:16;index"` // IMEI
 
@@ -48,10 +48,10 @@ type UserVehicle struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// Relationships
-	User          User    `json:"user,omitempty" gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	// Relationships - using references tag to specify the exact column to reference
+	User          User    `json:"user,omitempty" gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Vehicle       Vehicle `json:"vehicle,omitempty" gorm:"foreignKey:VehicleID;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	GrantedByUser User    `json:"granted_by_user,omitempty" gorm:"foreignKey:GrantedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
+	GrantedByUser User    `json:"granted_by_user,omitempty" gorm:"foreignKey:GrantedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
 // TableName specifies the table name for UserVehicle model

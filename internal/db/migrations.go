@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -288,88 +289,83 @@ func updateLatLongPrecision(db *gorm.DB) error {
 func ensureUserVehicleColumns(db *gorm.DB) error {
 	colors.PrintInfo("Ensuring user_vehicles table has all required permission columns...")
 
-	// First ensure the table has the primary key column
-	var idExists int64
+	// First check if the table exists
+	if !db.Migrator().HasTable("user_vehicles") {
+		colors.PrintWarning("user_vehicles table does not exist, it will be created by AutoMigrate")
+		return nil
+	}
+
+	// Check for multiple primary key constraint issue
+	var constraintCount int64
 	db.Raw(`
 		SELECT COUNT(*) 
-		FROM information_schema.columns 
+		FROM information_schema.table_constraints 
 		WHERE table_name = 'user_vehicles' 
-		AND column_name = 'id'
-	`).Count(&idExists)
+		AND constraint_type = 'PRIMARY KEY'
+	`).Count(&constraintCount)
 
-	if idExists == 0 {
-		colors.PrintInfo("Adding primary key 'id' column to user_vehicles table...")
-		sql := "ALTER TABLE user_vehicles ADD COLUMN id SERIAL PRIMARY KEY"
-		if err := db.Exec(sql).Error; err != nil {
-			colors.PrintWarning("Failed to add id column: %v", err)
+	if constraintCount > 1 {
+		colors.PrintWarning("Multiple primary key constraints detected on user_vehicles table (%d), this should be fixed during table recreation", constraintCount)
+		return nil
+	}
+
+	// Check if id column exists
+	var idExists bool
+	if err := db.Exec("SELECT id FROM user_vehicles LIMIT 1").Error; err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			idExists = false
 		} else {
-			colors.PrintSuccess("Added primary key 'id' column to user_vehicles table")
+			// Some other error occurred
+			return err
 		}
 	} else {
-		colors.PrintInfo("Primary key 'id' column already exists in user_vehicles table")
+		idExists = true
 	}
 
-	// List of required columns and their types
-	requiredColumns := map[string]string{
-		"user_id":        "INTEGER NOT NULL",
-		"vehicle_id":     "VARCHAR(16) NOT NULL",
-		"all_access":     "BOOLEAN DEFAULT FALSE",
-		"live_tracking":  "BOOLEAN DEFAULT FALSE",
-		"history":        "BOOLEAN DEFAULT FALSE",
-		"report":         "BOOLEAN DEFAULT FALSE",
-		"vehicle_edit":   "BOOLEAN DEFAULT FALSE",
-		"notification":   "BOOLEAN DEFAULT FALSE",
-		"share_tracking": "BOOLEAN DEFAULT FALSE",
-		"is_main_user":   "BOOLEAN DEFAULT FALSE",
-		"granted_by":     "INTEGER",
-		"granted_at":     "TIMESTAMP",
-		"expires_at":     "TIMESTAMP",
-		"is_active":      "BOOLEAN DEFAULT TRUE",
-		"notes":          "TEXT",
-
-		// Add GORM timestamp columns to be safe
-		"created_at": "TIMESTAMP",
-		"updated_at": "TIMESTAMP",
-		"deleted_at": "TIMESTAMP",
+	// If id column doesn't exist, we'll skip further operations as the table will be recreated
+	if !idExists {
+		colors.PrintWarning("Missing primary key 'id' column in user_vehicles table, this should be fixed during table recreation")
+		return nil
 	}
 
-	for columnName, columnType := range requiredColumns {
-		// Check if column exists
-		var columnExists int64
-		db.Raw(`
-			SELECT COUNT(*) 
-			FROM information_schema.columns 
-			WHERE table_name = 'user_vehicles' 
-			AND column_name = ?
-		`, columnName).Count(&columnExists)
+	// Check for required permission columns
+	requiredColumns := []string{
+		"all_access", "live_tracking", "history", "report", "vehicle_edit",
+		"notification", "share_tracking", "is_main_user", "is_active",
+		"created_at", "updated_at", "deleted_at",
+	}
 
-		if columnExists == 0 {
-			colors.PrintInfo("Adding column '%s' to user_vehicles table...", columnName)
-			sql := fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s %s", columnName, columnType)
-			if err := db.Exec(sql).Error; err != nil {
-				colors.PrintWarning("Failed to add column '%s': %v", columnName, err)
+	for _, column := range requiredColumns {
+		var columnExists bool
+		if err := db.Exec(fmt.Sprintf("SELECT %s FROM user_vehicles LIMIT 1", column)).Error; err != nil {
+			if strings.Contains(err.Error(), "does not exist") {
+				columnExists = false
 			} else {
-				colors.PrintSuccess("Added column '%s' to user_vehicles table", columnName)
+				// Some other error occurred
+				return err
 			}
 		} else {
-			colors.PrintInfo("Column '%s' already exists in user_vehicles table", columnName)
+			columnExists = true
 		}
-	}
 
-	// Add indexes for better performance
-	indexes := map[string]string{
-		"idx_user_vehicles_user_id":    "CREATE INDEX IF NOT EXISTS idx_user_vehicles_user_id ON user_vehicles(user_id)",
-		"idx_user_vehicles_vehicle_id": "CREATE INDEX IF NOT EXISTS idx_user_vehicles_vehicle_id ON user_vehicles(vehicle_id)",
-		"idx_user_vehicles_granted_by": "CREATE INDEX IF NOT EXISTS idx_user_vehicles_granted_by ON user_vehicles(granted_by)",
-		"idx_user_vehicles_active":     "CREATE INDEX IF NOT EXISTS idx_user_vehicles_active ON user_vehicles(is_active)",
-	}
+		if !columnExists {
+			colors.PrintInfo("Adding '%s' column to user_vehicles table...", column)
+			var alterCmd string
+			switch column {
+			case "all_access", "live_tracking", "history", "report", "vehicle_edit", "notification", "share_tracking", "is_main_user", "is_active":
+				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s BOOLEAN DEFAULT FALSE", column)
+			case "created_at", "updated_at":
+				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s TIMESTAMP DEFAULT CURRENT_TIMESTAMP", column)
+			case "deleted_at":
+				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s TIMESTAMP NULL", column)
+			default:
+				alterCmd = fmt.Sprintf("ALTER TABLE user_vehicles ADD COLUMN %s VARCHAR(255)", column)
+			}
 
-	for indexName, indexSQL := range indexes {
-		colors.PrintInfo("Creating index '%s'...", indexName)
-		if err := db.Exec(indexSQL).Error; err != nil {
-			colors.PrintWarning("Failed to create index '%s': %v", indexName, err)
-		} else {
-			colors.PrintSuccess("Created index '%s'", indexName)
+			if err := db.Exec(alterCmd).Error; err != nil {
+				return fmt.Errorf("failed to add column %s: %v", column, err)
+			}
+			colors.PrintSuccess("✓ Added '%s' column", column)
 		}
 	}
 

@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// GPSData represents GPS tracking data from devices
+// GPSData represents GPS data from tracking devices
 type GPSData struct {
 	ID        uint      `json:"id" gorm:"primarykey"`
 	IMEI      string    `json:"imei" gorm:"size:16;not null;index" validate:"required,len=16"`
@@ -57,9 +57,9 @@ type GPSData struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// Relationships
-	Device  Device  `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Vehicle Vehicle `json:"vehicle,omitempty" gorm:"foreignKey:IMEI;references:IMEI;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	// Relationships - we'll use manual loading instead of foreign keys to avoid circular references
+	Device  Device  `json:"-" gorm:"-"`
+	Vehicle Vehicle `json:"-" gorm:"-"`
 }
 
 // TableName specifies the table name for GPSData model
