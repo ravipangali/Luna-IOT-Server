@@ -303,6 +303,11 @@ func ensureUserVehicleColumns(db *gorm.DB) error {
 		"expires_at":     "TIMESTAMP",
 		"is_active":      "BOOLEAN DEFAULT TRUE",
 		"notes":          "TEXT",
+
+		// Add GORM timestamp columns to be safe
+		"created_at": "TIMESTAMP",
+		"updated_at": "TIMESTAMP",
+		"deleted_at": "TIMESTAMP",
 	}
 
 	for columnName, columnType := range requiredColumns {
