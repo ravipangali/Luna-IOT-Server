@@ -34,6 +34,9 @@ type UserVehicle struct {
 	Notification  bool `json:"notification" gorm:"default:false"`
 	ShareTracking bool `json:"share_tracking" gorm:"default:false"`
 
+	// Main user flag - indicates if this user is the primary owner of the vehicle
+	IsMainUser bool `json:"is_main_user" gorm:"default:false"`
+
 	// Additional metadata
 	GrantedBy uint       `json:"granted_by" gorm:"index"` // User ID who granted the access
 	GrantedAt time.Time  `json:"granted_at"`
@@ -185,4 +188,37 @@ func (uv *UserVehicle) RevokePermission(permission Permission) {
 	case PermissionShareTracking:
 		uv.ShareTracking = false
 	}
+}
+
+// IsMainUserOfVehicle checks if this user is the main owner of the vehicle
+func (uv *UserVehicle) IsMainUserOfVehicle() bool {
+	return uv.IsMainUser
+}
+
+// CreateMainUserAssignment creates a UserVehicle relationship for the main user (owner)
+func CreateMainUserAssignment(userID uint, vehicleID string, grantedBy uint) *UserVehicle {
+	return &UserVehicle{
+		UserID:        userID,
+		VehicleID:     vehicleID,
+		AllAccess:     true, // Main user gets all access
+		LiveTracking:  true,
+		History:       true,
+		Report:        true,
+		VehicleEdit:   true,
+		Notification:  true,
+		ShareTracking: true,
+		IsMainUser:    true, // Mark as main user
+		GrantedBy:     grantedBy,
+		GrantedAt:     time.Now(),
+		IsActive:      true,
+		Notes:         "Main user (Vehicle Owner)",
+	}
+}
+
+// GetUserRole returns the role of the user for this vehicle (main or shared)
+func (uv *UserVehicle) GetUserRole() string {
+	if uv.IsMainUser {
+		return "main"
+	}
+	return "shared"
 }

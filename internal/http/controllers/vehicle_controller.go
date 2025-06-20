@@ -19,69 +19,126 @@ func NewVehicleController() *VehicleController {
 	return &VehicleController{}
 }
 
-// GetVehicles returns all vehicles with their associated devices
+// GetVehicles returns all vehicles with pagination and filtering
 func (vc *VehicleController) GetVehicles(c *gin.Context) {
-	var vehicles []models.Vehicle
+	// Parse query parameters with defaults
+	page := parseInt(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	limit := parseInt(c.DefaultQuery("limit", "10"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Optional filtering
+	var query = db.GetDB()
+
+	if vehicleType := c.Query("type"); vehicleType != "" {
+		query = query.Where("vehicle_type = ?", vehicleType)
+	}
+
+	if regNo := c.Query("reg_no"); regNo != "" {
+		query = query.Where("reg_no ILIKE ?", "%"+regNo+"%")
+	}
+
+	if name := c.Query("name"); name != "" {
+		query = query.Where("name ILIKE ?", "%"+name+"%")
+	}
+
+	if imei := c.Query("imei"); imei != "" {
+		query = query.Where("imei LIKE ?", "%"+imei+"%")
+	}
+
+	// Get total count for pagination
 	var totalCount int64
-
-	// Get page and limit parameters
-	page := 1
-	limit := 10
-
-	if p := c.Query("page"); p != "" {
-		if parsedPage := parseInt(p); parsedPage > 0 {
-			page = parsedPage
-		}
-	}
-
-	if l := c.Query("limit"); l != "" {
-		if parsedLimit := parseInt(l); parsedLimit > 0 {
-			limit = parsedLimit
-		}
-	}
-
-	// Count total vehicles for pagination
-	if err := db.GetDB().Model(&models.Vehicle{}).Count(&totalCount).Error; err != nil {
-		colors.PrintError("Failed to count vehicles: %v", err)
+	if err := query.Model(&models.Vehicle{}).Count(&totalCount).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to count vehicles",
 		})
 		return
 	}
 
-	// Calculate offset
-	offset := (page - 1) * limit
-
-	// Load vehicles with pagination
-	if err := db.GetDB().Limit(limit).Offset(offset).Find(&vehicles).Error; err != nil {
-		colors.PrintError("Failed to fetch vehicles from database: %v", err)
+	// Get vehicles with pagination
+	var vehicles []models.Vehicle
+	if err := query.Limit(limit).Offset(offset).Find(&vehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch vehicles",
 		})
 		return
 	}
 
-	// Manually load device information for each vehicle
+	// Load additional data for each vehicle
 	for i := range vehicles {
+		// Load device information
 		var device models.Device
 		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).First(&device).Error; err == nil {
 			vehicles[i].Device = device
 		}
-		// If device not found, continue without setting it (device will be empty)
+
+		// Load user access information
+		var userAccess []models.UserVehicle
+		if err := db.GetDB().Preload("User").Where("vehicle_id = ? AND is_active = ?", vehicles[i].IMEI, true).Find(&userAccess).Error; err == nil {
+			vehicles[i].UserAccess = userAccess
+		}
 	}
 
-	// Calculate total pages
+	// Calculate pagination info
 	totalPages := int((totalCount + int64(limit) - 1) / int64(limit))
 
-	colors.PrintInfo("Successfully fetched %d vehicles (page %d of %d)", len(vehicles), page, totalPages)
+	// Enhanced response with user summary
+	var vehicleList []map[string]interface{}
+	for _, vehicle := range vehicles {
+		mainUserCount := 0
+		sharedUserCount := 0
+		var mainUserName string
+
+		for _, access := range vehicle.UserAccess {
+			if access.IsExpired() {
+				continue
+			}
+			if access.IsMainUser {
+				mainUserCount++
+				mainUserName = access.User.Name
+			} else {
+				sharedUserCount++
+			}
+		}
+
+		vehicleInfo := map[string]interface{}{
+			"imei":              vehicle.IMEI,
+			"reg_no":            vehicle.RegNo,
+			"name":              vehicle.Name,
+			"vehicle_type":      vehicle.VehicleType,
+			"odometer":          vehicle.Odometer,
+			"mileage":           vehicle.Mileage,
+			"min_fuel":          vehicle.MinFuel,
+			"overspeed":         vehicle.Overspeed,
+			"created_at":        vehicle.CreatedAt,
+			"updated_at":        vehicle.UpdatedAt,
+			"device":            vehicle.Device,
+			"main_user_count":   mainUserCount,
+			"shared_user_count": sharedUserCount,
+			"total_user_count":  mainUserCount + sharedUserCount,
+			"main_user_name":    mainUserName,
+		}
+
+		vehicleList = append(vehicleList, vehicleInfo)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    vehicles,
+		"data": vehicleList,
 		"pagination": gin.H{
-			"current_page": page,
-			"per_page":     limit,
-			"total":        totalCount,
-			"total_pages":  totalPages,
+			"page":        page,
+			"limit":       limit,
+			"total_count": totalCount,
+			"total_pages": totalPages,
+			"has_next":    page < totalPages,
+			"has_prev":    page > 1,
 		},
 		"message": "Vehicles retrieved successfully",
 	})
@@ -99,59 +156,71 @@ func parseInt(s string) int {
 func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	imei := c.Param("imei")
 	if len(imei) != 16 {
-		colors.PrintError("Invalid IMEI format for vehicle lookup: %s (length: %d)", imei, len(imei))
 		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Invalid IMEI format",
-			"message": "IMEI must be exactly 16 digits",
+			"error": "Invalid IMEI format",
 		})
 		return
 	}
 
-	colors.PrintInfo("🔍 Looking up vehicle with IMEI: %s", imei)
-
 	var vehicle models.Vehicle
 	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err != nil {
-		colors.PrintError("❌ Vehicle not found for IMEI: %s, error: %v", imei, err)
-
-		// Check if device exists but vehicle doesn't
-		var device models.Device
-		if deviceErr := db.GetDB().Where("imei = ?", imei).First(&device).Error; deviceErr == nil {
-			colors.PrintWarning("⚠️  Device exists but vehicle not registered for IMEI: %s", imei)
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   "Vehicle not registered",
-				"message": "Device exists but no vehicle is registered with this IMEI",
-				"imei":    imei,
-			})
-		} else {
-			colors.PrintError("❌ Device also not found for IMEI: %s", imei)
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   "Vehicle not found",
-				"message": "No vehicle found with this IMEI",
-				"imei":    imei,
-			})
-		}
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Vehicle not found",
+		})
 		return
 	}
 
-	// Manually load device information
+	// Load associated device
 	var device models.Device
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
 		vehicle.Device = device
-		colors.PrintInfo("📱 Device loaded for vehicle: %s", device.SimNo)
-	} else {
-		colors.PrintWarning("⚠️  No device found for vehicle IMEI: %s", vehicle.IMEI)
 	}
 
-	colors.PrintSuccess("✅ Vehicle found: %s (%s) - %s", vehicle.Name, vehicle.RegNo, vehicle.VehicleType)
+	// Load user access information with user details
+	var userAccess []models.UserVehicle
+	if err := db.GetDB().Preload("User").Where("vehicle_id = ? AND is_active = ?", vehicle.IMEI, true).Find(&userAccess).Error; err == nil {
+		vehicle.UserAccess = userAccess
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
+	// Organize users by their roles
+	var mainUsers []map[string]interface{}
+	var sharedUsers []map[string]interface{}
+
+	for _, access := range vehicle.UserAccess {
+		if access.IsExpired() {
+			continue // Skip expired access
+		}
+
+		userInfo := map[string]interface{}{
+			"id":          access.User.ID,
+			"name":        access.User.Name,
+			"email":       access.User.Email,
+			"role":        access.GetUserRole(),
+			"permissions": access.GetPermissions(),
+			"granted_at":  access.GrantedAt,
+			"expires_at":  access.ExpiresAt,
+			"notes":       access.Notes,
+			"is_active":   access.IsActive,
+		}
+
+		if access.IsMainUser {
+			mainUsers = append(mainUsers, userInfo)
+		} else {
+			sharedUsers = append(sharedUsers, userInfo)
+		}
+	}
+
+	response := gin.H{
 		"data":    vehicle,
 		"message": "Vehicle retrieved successfully",
-	})
+		"users": gin.H{
+			"main_users":   mainUsers,
+			"shared_users": sharedUsers,
+			"total_users":  len(vehicle.UserAccess),
+		},
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // GetVehicleByRegNo returns a vehicle by registration number
@@ -180,18 +249,37 @@ func (vc *VehicleController) GetVehicleByRegNo(c *gin.Context) {
 
 // CreateVehicle creates a new vehicle
 func (vc *VehicleController) CreateVehicle(c *gin.Context) {
-	var vehicle models.Vehicle
+	var requestData struct {
+		models.Vehicle
+		MainUserID uint `json:"main_user_id" binding:"required"`
+	}
 
-	if err := c.ShouldBindJSON(&vehicle); err != nil {
+	if err := c.ShouldBindJSON(&requestData); err != nil {
 		colors.PrintError("Invalid JSON in vehicle creation request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid request data",
 			"details": err.Error(),
+			"message": "main_user_id is required for vehicle creation",
 		})
 		return
 	}
 
-	colors.PrintInfo("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s", vehicle.IMEI, vehicle.RegNo, vehicle.VehicleType)
+	vehicle := requestData.Vehicle
+	mainUserID := requestData.MainUserID
+
+	colors.PrintInfo("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s, MainUser: %d",
+		vehicle.IMEI, vehicle.RegNo, vehicle.VehicleType, mainUserID)
+
+	// Validate main user exists
+	var mainUser models.User
+	if err := db.GetDB().First(&mainUser, mainUserID).Error; err != nil {
+		colors.PrintWarning("Main user with ID %d not found", mainUserID)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Main user not found",
+			"message": "The specified main user does not exist",
+		})
+		return
+	}
 
 	// Validate IMEI length
 	if len(vehicle.IMEI) != 16 {
@@ -270,8 +358,26 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 		return
 	}
 
+	// Get current user for audit
+	currentUser, exists := c.Get("user")
+	var grantedBy uint
+	if exists {
+		grantedBy = currentUser.(*models.User).ID
+	} else {
+		grantedBy = mainUserID // Fallback to main user if no current user
+	}
+
+	// Start transaction
+	tx := db.GetDB().Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
 	// Create the vehicle
-	if err := db.GetDB().Create(&vehicle).Error; err != nil {
+	if err := tx.Create(&vehicle).Error; err != nil {
+		tx.Rollback()
 		colors.PrintError("Failed to create vehicle in database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to create vehicle",
@@ -280,15 +386,45 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 		return
 	}
 
-	// Manually load the device information
-	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
-		vehicle.Device = device
+	// Create main user assignment
+	mainUserAssignment := models.CreateMainUserAssignment(mainUserID, vehicle.IMEI, grantedBy)
+	if err := tx.Create(mainUserAssignment).Error; err != nil {
+		tx.Rollback()
+		colors.PrintError("Failed to assign main user to vehicle: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to assign main user to vehicle",
+			"details": err.Error(),
+		})
+		return
 	}
 
-	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s", vehicle.IMEI, vehicle.RegNo)
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		colors.PrintError("Failed to commit vehicle creation transaction: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to complete vehicle creation",
+		})
+		return
+	}
+
+	// Load device information and user assignments
+	db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device)
+	vehicle.Device = device
+
+	// Load user access information
+	db.GetDB().Preload("User").Where("vehicle_id = ?", vehicle.IMEI).Find(&vehicle.UserAccess)
+
+	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s, MainUser=%s",
+		vehicle.IMEI, vehicle.RegNo, mainUser.Email)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"data":    vehicle,
-		"message": "Vehicle created successfully",
+		"message": "Vehicle created successfully with main user assigned",
+		"main_user": gin.H{
+			"id":    mainUser.ID,
+			"name":  mainUser.Name,
+			"email": mainUser.Email,
+		},
 	})
 }
 
