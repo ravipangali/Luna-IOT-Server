@@ -28,12 +28,14 @@ type Device struct {
 	SimNo       string         `json:"sim_no" gorm:"size:20" validate:"required"`
 	SimOperator SimOperator    `json:"sim_operator" gorm:"type:varchar(10);not null" validate:"required,oneof=Ncell Ntc"`
 	Protocol    Protocol       `json:"protocol" gorm:"type:varchar(10);not null;default:'GT06'" validate:"required"`
+	ICCID       string         `json:"iccid" gorm:"type:text"`
+	ModelID     *uint          `json:"model_id" gorm:"index"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
 
-	// No relationships - Device is completely independent
-	// Vehicles can reference devices by IMEI, but devices don't know about vehicles
+	// Relationships
+	Model DeviceModel `json:"model,omitempty" gorm:"foreignKey:ModelID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
 }
 
 // TableName specifies the table name for Device model

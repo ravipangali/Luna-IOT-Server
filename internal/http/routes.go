@@ -18,6 +18,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	authController := controllers.NewAuthController()
 	userController := controllers.NewUserController()
 	deviceController := controllers.NewDeviceController()
+	deviceModelController := controllers.NewDeviceModelController()
 	vehicleController := controllers.NewVehicleController()
 	userVehicleController := controllers.NewUserVehicleController()
 	gpsController := controllers.NewGPSController()
@@ -77,6 +78,17 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			devices.POST("", middleware.AdminOnlyMiddleware(), deviceController.CreateDevice)       // Admin only
 			devices.PUT("/:id", middleware.AdminOnlyMiddleware(), deviceController.UpdateDevice)    // Admin only
 			devices.DELETE("/:id", middleware.AdminOnlyMiddleware(), deviceController.DeleteDevice) // Admin only
+		}
+
+		// Device Model routes (authenticated users only)
+		deviceModels := v1.Group("/device-models")
+		deviceModels.Use(middleware.AuthMiddleware())
+		{
+			deviceModels.GET("", deviceModelController.GetDeviceModels)
+			deviceModels.GET("/:id", deviceModelController.GetDeviceModel)
+			deviceModels.POST("", middleware.AdminOnlyMiddleware(), deviceModelController.CreateDeviceModel)       // Admin only
+			deviceModels.PUT("/:id", middleware.AdminOnlyMiddleware(), deviceModelController.UpdateDeviceModel)    // Admin only
+			deviceModels.DELETE("/:id", middleware.AdminOnlyMiddleware(), deviceModelController.DeleteDeviceModel) // Admin only
 		}
 
 		// Vehicle routes (authenticated users only)

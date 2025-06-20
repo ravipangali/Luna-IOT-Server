@@ -67,7 +67,9 @@ func (dc *DeviceController) createSuccessResponse(c *gin.Context, statusCode int
 func (dc *DeviceController) GetDevices(c *gin.Context) {
 	var devices []models.Device
 
-	if err := db.GetDB().Find(&devices).Error; err != nil {
+	query := db.GetDB().Preload("Model")
+
+	if err := query.Find(&devices).Error; err != nil {
 		dc.createErrorResponse(c, http.StatusInternalServerError, "DATABASE_ERROR",
 			"Unable to retrieve devices from database",
 			map[string]string{
@@ -102,7 +104,7 @@ func (dc *DeviceController) GetDevice(c *gin.Context) {
 	}
 
 	var device models.Device
-	if err := db.GetDB().First(&device, uint(id)).Error; err != nil {
+	if err := db.GetDB().Preload("Model").First(&device, uint(id)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			dc.createErrorResponse(c, http.StatusNotFound, "DEVICE_NOT_FOUND",
 				"No device found with the specified ID",
@@ -156,7 +158,7 @@ func (dc *DeviceController) GetDeviceByIMEI(c *gin.Context) {
 	}
 
 	var device models.Device
-	if err := db.GetDB().Where("imei = ?", imei).First(&device).Error; err != nil {
+	if err := db.GetDB().Preload("Model").Where("imei = ?", imei).First(&device).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			dc.createErrorResponse(c, http.StatusNotFound, "DEVICE_NOT_FOUND",
 				"No device found with the specified IMEI",
@@ -302,6 +304,21 @@ func (dc *DeviceController) CreateDevice(c *gin.Context) {
 			"supported_protocols": []string{string(models.ProtocolGT06)},
 		})
 		return
+	}
+
+	// Validate device model if provided
+	if device.ModelID != nil {
+		var deviceModel models.DeviceModel
+		if err := db.GetDB().First(&deviceModel, *device.ModelID).Error; err != nil {
+			colors.PrintWarning("⚠️ Invalid device model ID: %d", *device.ModelID)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "Invalid device model",
+				"message": "The specified device model does not exist",
+			})
+			return
+		}
+		colors.PrintInfo("🔧 Device model: %s (ID: %d)", deviceModel.Name, deviceModel.ID)
 	}
 
 	// Test database connection before saving

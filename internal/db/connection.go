@@ -95,6 +95,12 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ Users table ready")
 
+	err = DB.AutoMigrate(&models.DeviceModel{})
+	if err != nil {
+		return fmt.Errorf("device_model table migration failed: %v", err)
+	}
+	colors.PrintSuccess("✓ Device Models table ready")
+
 	err = DB.AutoMigrate(&models.Device{})
 	if err != nil {
 		return fmt.Errorf("device table migration failed: %v", err)
