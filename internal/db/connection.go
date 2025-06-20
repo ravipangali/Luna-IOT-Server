@@ -115,6 +115,14 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ Vehicles table ready")
 
+	// Force drop and recreate user_vehicles table to fix persistent schema issues
+	colors.PrintWarning("Attempting to fix 'user_vehicles' table by dropping and recreating it...")
+	if err := DB.Migrator().DropTable(&models.UserVehicle{}); err != nil {
+		colors.PrintWarning("Could not drop user_vehicles table (it may not exist or have dependencies): %v", err)
+	} else {
+		colors.PrintSuccess("Dropped 'user_vehicles' table successfully.")
+	}
+
 	// Create user-vehicle relationship table
 	err = DB.AutoMigrate(&models.UserVehicle{})
 	if err != nil {
