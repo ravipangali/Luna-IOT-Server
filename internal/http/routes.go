@@ -31,6 +31,11 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		controlController = controllers.NewControlController()
 	}
 
+	// Initialize user-based controllers
+	userTrackingController := controllers.NewUserTrackingController()
+	userControlController := controllers.NewUserControlController(controlController)
+	userGPSController := controllers.NewUserGPSController()
+
 	// WebSocket endpoint for real-time data (no auth required for now)
 	router.GET("/ws", HandleWebSocket)
 
@@ -119,6 +124,78 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			customerVehicles.DELETE("/:imei/share/:shareId", vehicleController.RevokeVehicleShare) // Revoke vehicle share
 		}
 
+		// ===========================================
+		// NEW: USER-BASED TRACKING ROUTES (CLIENT APP)
+		// ===========================================
+		userTracking := v1.Group("/my-tracking")
+		userTracking.Use(middleware.AuthMiddleware())
+		{
+			// Get tracking data for all user's vehicles
+			userTracking.GET("", userTrackingController.GetMyVehiclesTracking)
+
+			// Get detailed tracking for a specific vehicle
+			userTracking.GET("/:imei", userTrackingController.GetMyVehicleTracking)
+
+			// Get only location data for a specific vehicle
+			userTracking.GET("/:imei/location", userTrackingController.GetMyVehicleLocation)
+
+			// Get only status data for a specific vehicle
+			userTracking.GET("/:imei/status", userTrackingController.GetMyVehicleStatus)
+
+			// Get GPS history for a specific vehicle
+			userTracking.GET("/:imei/history", userTrackingController.GetMyVehicleHistory)
+
+			// Get route data for a specific vehicle
+			userTracking.GET("/:imei/route", userTrackingController.GetMyVehicleRoute)
+
+			// Get reports for a specific vehicle
+			userTracking.GET("/:imei/reports", userTrackingController.GetMyVehicleReports)
+		}
+
+		// ===========================================
+		// NEW: USER-BASED CONTROL ROUTES (CLIENT APP)
+		// ===========================================
+		userControl := v1.Group("/my-control")
+		userControl.Use(middleware.AuthMiddleware())
+		{
+			// Cut oil and electricity for user's vehicle
+			userControl.POST("/:imei/cut-oil", userControlController.CutOilAndElectricity)
+
+			// Connect oil and electricity for user's vehicle
+			userControl.POST("/:imei/connect-oil", userControlController.ConnectOilAndElectricity)
+
+			// Get location for user's vehicle
+			userControl.POST("/:imei/get-location", userControlController.GetVehicleLocation)
+
+			// Get user's active devices
+			userControl.GET("/active-devices", userControlController.GetUserActiveDevices)
+		}
+
+		// ===========================================
+		// NEW: USER-BASED GPS ROUTES (CLIENT APP)
+		// ===========================================
+		userGPS := v1.Group("/my-gps")
+		userGPS.Use(middleware.AuthMiddleware())
+		{
+			// Get GPS data for all user's vehicles
+			userGPS.GET("", userGPSController.GetUserVehicleTracking)
+
+			// Get location data for a specific vehicle
+			userGPS.GET("/:imei/location", userGPSController.GetUserVehicleLocation)
+
+			// Get status data for a specific vehicle
+			userGPS.GET("/:imei/status", userGPSController.GetUserVehicleStatus)
+
+			// Get GPS history with pagination
+			userGPS.GET("/:imei/history", userGPSController.GetUserVehicleHistory)
+
+			// Get GPS route data
+			userGPS.GET("/:imei/route", userGPSController.GetUserVehicleRoute)
+
+			// Get GPS reports
+			userGPS.GET("/:imei/report", userGPSController.GetUserVehicleReport)
+		}
+
 		// GPS tracking routes (authenticated users only)
 		gps := v1.Group("/gps")
 		gps.Use(middleware.AuthMiddleware())
@@ -189,6 +266,12 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 				"register": "/api/v1/auth/register",
 				"me":       "/api/v1/auth/me",
 				"logout":   "/api/v1/auth/logout",
+			},
+			"client_api": gin.H{
+				"my_vehicles": "/api/v1/my-vehicles",
+				"my_tracking": "/api/v1/my-tracking",
+				"my_control":  "/api/v1/my-control",
+				"my_gps":      "/api/v1/my-gps",
 			},
 		})
 	})

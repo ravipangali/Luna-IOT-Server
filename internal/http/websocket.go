@@ -24,11 +24,26 @@ var upgrader = websocket.Upgrader{
 
 // WebSocketHub manages WebSocket connections
 type WebSocketHub struct {
-	clients    map[*websocket.Conn]bool
+	clients    map[*websocket.Conn]*ClientInfo
 	broadcast  chan []byte
-	register   chan *websocket.Conn
+	register   chan *ClientConnection
 	unregister chan *websocket.Conn
 	mutex      sync.RWMutex
+}
+
+// ClientInfo stores information about connected clients
+type ClientInfo struct {
+	UserID          uint
+	AccessibleIMEIs []string
+	IsAuthenticated bool
+	LastActivity    time.Time
+}
+
+// ClientConnection represents a new client connection with user info
+type ClientConnection struct {
+	Conn   *websocket.Conn
+	UserID uint
+	IMEIs  []string
 }
 
 // WebSocketMessage represents a message sent through WebSocket
@@ -168,9 +183,9 @@ var WSHub *WebSocketHub
 // NewWebSocketHub creates a new WebSocket hub
 func NewWebSocketHub() *WebSocketHub {
 	return &WebSocketHub{
-		clients:    make(map[*websocket.Conn]bool),
+		clients:    make(map[*websocket.Conn]*ClientInfo),
 		broadcast:  make(chan []byte),
-		register:   make(chan *websocket.Conn),
+		register:   make(chan *ClientConnection),
 		unregister: make(chan *websocket.Conn),
 	}
 }
@@ -181,33 +196,67 @@ func (h *WebSocketHub) Run() {
 
 	for {
 		select {
-		case client := <-h.register:
+		case clientConn := <-h.register:
 			h.mutex.Lock()
-			h.clients[client] = true
+			h.clients[clientConn.Conn] = &ClientInfo{
+				UserID:          clientConn.UserID,
+				AccessibleIMEIs: clientConn.IMEIs,
+				IsAuthenticated: true,
+				LastActivity:    time.Now(),
+			}
 			h.mutex.Unlock()
-			colors.PrintConnection("📱", "WebSocket client connected. Total clients: %d", len(h.clients))
+			colors.PrintConnection("📱", "WebSocket client connected for User ID %d. Total clients: %d", clientConn.UserID, len(h.clients))
 
 		case client := <-h.unregister:
 			h.mutex.Lock()
-			if _, ok := h.clients[client]; ok {
+			if clientInfo, ok := h.clients[client]; ok {
+				colors.PrintConnection("📱", "WebSocket client disconnected for User ID %d. Total clients: %d", clientInfo.UserID, len(h.clients)-1)
 				delete(h.clients, client)
 				client.Close()
 			}
 			h.mutex.Unlock()
-			colors.PrintConnection("📱", "WebSocket client disconnected. Total clients: %d", len(h.clients))
 
 		case message := <-h.broadcast:
 			h.mutex.RLock()
-			for client := range h.clients {
-				if err := client.WriteMessage(websocket.TextMessage, message); err != nil {
-					colors.PrintError("Error sending message to WebSocket client: %v", err)
-					client.Close()
-					delete(h.clients, client)
+			var wsMessage WebSocketMessage
+			json.Unmarshal(message, &wsMessage)
+
+			// Extract IMEI from the message data for filtering
+			var imei string
+			if data, ok := wsMessage.Data.(map[string]interface{}); ok {
+				if imeiVal, exists := data["imei"]; exists {
+					imei, _ = imeiVal.(string)
+				}
+			}
+
+			// Send to authorized clients only
+			for client, clientInfo := range h.clients {
+				if clientInfo.IsAuthenticated && h.isClientAuthorizedForIMEI(clientInfo, imei) {
+					err := client.WriteMessage(websocket.TextMessage, message)
+					if err != nil {
+						colors.PrintError("Error sending WebSocket message to User ID %d: %v", clientInfo.UserID, err)
+						delete(h.clients, client)
+						client.Close()
+					}
 				}
 			}
 			h.mutex.RUnlock()
 		}
 	}
+}
+
+// isClientAuthorizedForIMEI checks if client has access to the specific IMEI
+func (h *WebSocketHub) isClientAuthorizedForIMEI(clientInfo *ClientInfo, imei string) bool {
+	if imei == "" {
+		return false // No IMEI specified, can't authorize
+	}
+
+	for _, accessibleIMEI := range clientInfo.AccessibleIMEIs {
+		if accessibleIMEI == imei {
+			return true
+		}
+	}
+	return false
 }
 
 // BroadcastGPSUpdate sends GPS data updates to all connected clients
@@ -472,18 +521,56 @@ func (h *WebSocketHub) BroadcastDeviceStatus(imei, status, vehicleReg string) {
 	}
 }
 
-// HandleWebSocket handles WebSocket connections
+// HandleWebSocket handles WebSocket connections with user authentication
 func HandleWebSocket(c *gin.Context) {
+	// Check for authentication token in query parameters
+	token := c.Query("token")
+	if token == "" {
+		colors.PrintError("WebSocket connection attempted without authentication token")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication token required"})
+		return
+	}
+
+	// Validate user token and get user information
+	var user models.User
+	if err := db.GetDB().Where("token = ? AND token_exp > ?", token, time.Now()).First(&user).Error; err != nil {
+		colors.PrintError("WebSocket connection attempted with invalid token")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+		return
+	}
+
+	// Get user's accessible vehicles
+	var userVehicles []models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND is_active = ? AND (live_tracking = ? OR all_access = ?)",
+		user.ID, true, true, true).Find(&userVehicles).Error; err != nil {
+		colors.PrintError("Failed to get user vehicles for WebSocket: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user vehicles"})
+		return
+	}
+
+	// Extract accessible IMEIs
+	var accessibleIMEIs []string
+	for _, userVehicle := range userVehicles {
+		if !userVehicle.IsExpired() {
+			accessibleIMEIs = append(accessibleIMEIs, userVehicle.VehicleID)
+		}
+	}
+
+	// Upgrade the HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		colors.PrintError("Failed to upgrade to WebSocket: %v", err)
 		return
 	}
 
-	colors.PrintConnection("🔗", "New WebSocket connection from %s", c.ClientIP())
+	colors.PrintConnection("🔗", "New WebSocket connection established for User ID %d from %s", user.ID, c.ClientIP())
 
-	// Register the connection
-	WSHub.register <- conn
+	// Register the connection with user information
+	WSHub.register <- &ClientConnection{
+		Conn:   conn,
+		UserID: user.ID,
+		IMEIs:  accessibleIMEIs,
+	}
 
 	// Handle connection in a goroutine
 	go func() {
@@ -491,12 +578,27 @@ func HandleWebSocket(c *gin.Context) {
 			WSHub.unregister <- conn
 		}()
 
+		// Send initial welcome message with user's accessible vehicles
+		welcomeMsg := WebSocketMessage{
+			Type:      "welcome",
+			Timestamp: time.Now().Format(time.RFC3339),
+			Data: map[string]interface{}{
+				"user_id":          user.ID,
+				"accessible_imeis": accessibleIMEIs,
+				"message":          "WebSocket connection established",
+			},
+		}
+
+		if welcomeData, err := json.Marshal(welcomeMsg); err == nil {
+			conn.WriteMessage(websocket.TextMessage, welcomeData)
+		}
+
 		// Keep connection alive and handle incoming messages
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					colors.PrintError("WebSocket error: %v", err)
+					colors.PrintError("WebSocket error for User ID %d: %v", user.ID, err)
 				}
 				break
 			}
