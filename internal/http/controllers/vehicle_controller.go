@@ -629,6 +629,11 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 		vehicleData := map[string]interface{}{
 			"vehicle":    userVehicle.Vehicle,
 			"latest_gps": nil, // Default to null
+			"access_info": map[string]interface{}{
+				"is_main_user": userVehicle.IsMainUser,
+				"role":         userVehicle.GetUserRole(),
+				"permissions":  userVehicle.GetPermissions(),
+			},
 		}
 
 		// Add GPS data if it exists

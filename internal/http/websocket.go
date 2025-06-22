@@ -218,16 +218,19 @@ func (h *WebSocketHub) Run() {
 
 		case message := <-h.broadcast:
 			h.mutex.RLock()
-			var wsMessage WebSocketMessage
-			json.Unmarshal(message, &wsMessage)
-
-			// Extract IMEI from the message data for filtering
-			var imei string
-			if data, ok := wsMessage.Data.(map[string]interface{}); ok {
-				if imeiVal, exists := data["imei"]; exists {
-					imei, _ = imeiVal.(string)
-				}
+			// To authorize, we need to know the IMEI. We can get this by
+			// unmarshalling the message into a temporary struct.
+			var msg struct {
+				Data struct {
+					IMEI string `json:"imei"`
+				} `json:"data"`
 			}
+			if err := json.Unmarshal(message, &msg); err != nil {
+				colors.PrintError("Could not unmarshal broadcast message for auth: %v", err)
+				h.mutex.RUnlock()
+				continue
+			}
+			imei := msg.Data.IMEI
 
 			// Send to authorized clients only
 			for client, clientInfo := range h.clients {
@@ -235,8 +238,10 @@ func (h *WebSocketHub) Run() {
 					err := client.WriteMessage(websocket.TextMessage, message)
 					if err != nil {
 						colors.PrintError("Error sending WebSocket message to User ID %d: %v", clientInfo.UserID, err)
-						delete(h.clients, client)
-						client.Close()
+						// The client is likely disconnected, so we unregister them
+						go func(c *websocket.Conn) {
+							h.unregister <- c
+						}(client)
 					}
 				}
 			}
@@ -677,15 +682,7 @@ func (h *WebSocketHub) BroadcastFullGPSUpdate(gpsData *models.GPSData) {
 		return
 	}
 
-	h.mutex.RLock()
-	defer h.mutex.RUnlock()
-
-	for client, clientInfo := range h.clients {
-		// Check if the client is authenticated and has permission to see this device
-		if h.isClientAuthorizedForIMEI(clientInfo, gpsData.IMEI) {
-			if err := client.WriteMessage(websocket.TextMessage, payload); err != nil {
-				colors.PrintWarning("Failed to send GPS update to client %s: %v", client.RemoteAddr(), err)
-			}
-		}
-	}
+	// Send the payload to the central broadcast channel.
+	// The Run() method will handle authorization and distribution.
+	h.broadcast <- payload
 }
