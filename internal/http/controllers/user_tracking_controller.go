@@ -8,6 +8,7 @@ import (
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
+	"luna_iot_server/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -605,7 +606,17 @@ func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSDat
 	}
 
 	totalPoints := len(gpsData)
-	totalDistance := 0.0
+	var totalDistance float64
+	if len(gpsData) > 1 {
+		for i := 0; i < len(gpsData)-1; i++ {
+			p1 := gpsData[i]
+			p2 := gpsData[i+1]
+			if p1.Latitude != nil && p1.Longitude != nil && p2.Latitude != nil && p2.Longitude != nil {
+				totalDistance += utils.CalculateDistance(*p1.Latitude, *p1.Longitude, *p2.Latitude, *p2.Longitude)
+			}
+		}
+	}
+
 	maxSpeed := 0
 	totalIgnitionOnTime := 0.0
 	movingTime := 0.0
@@ -619,14 +630,6 @@ func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSDat
 	var stoppedStart *time.Time
 
 	for i, data := range gpsData {
-		// Calculate distance if we have coordinates
-		if lastPoint != nil && data.Latitude != nil && data.Longitude != nil &&
-			lastPoint.Latitude != nil && lastPoint.Longitude != nil {
-			distance := utc.calculateDistance(*lastPoint.Latitude, *lastPoint.Longitude,
-				*data.Latitude, *data.Longitude)
-			totalDistance += distance
-		}
-
 		// Track max speed
 		if data.Speed != nil && *data.Speed > maxSpeed {
 			maxSpeed = *data.Speed
@@ -712,7 +715,7 @@ func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSDat
 		avgSpeed = totalDistance / movingTime
 	}
 
-	return map[string]interface{}{
+	stats := map[string]interface{}{
 		"total_points":       totalPoints,
 		"total_distance":     totalDistance,
 		"max_speed":          maxSpeed,
@@ -722,28 +725,6 @@ func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSDat
 		"idle_time_hours":    idleTime,
 		"stopped_time_hours": stoppedTime,
 	}
-}
 
-// Helper function to calculate distance between two coordinates (Haversine formula)
-func (utc *UserTrackingController) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
-	const R = 6371 // Earth's radius in kilometers
-
-	dLat := (lat2 - lat1) * (3.14159265359 / 180)
-	dLng := (lng2 - lng1) * (3.14159265359 / 180)
-
-	lat1Rad := lat1 * (3.14159265359 / 180)
-	lat2Rad := lat2 * (3.14159265359 / 180)
-
-	a := (1 - (dLat * dLat / 4)) +
-		lat1Rad*lat2Rad*(1-(dLng*dLng/4))
-
-	if a < 0 {
-		a = 0
-	}
-	if a > 1 {
-		a = 1
-	}
-
-	c := 2 * (a * a)
-	return R * c
+	return stats
 }

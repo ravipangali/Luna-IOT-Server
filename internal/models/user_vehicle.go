@@ -222,3 +222,12 @@ func (uv *UserVehicle) GetUserRole() string {
 	}
 	return "shared"
 }
+
+// GetAccessInfo returns a map of access information for the user vehicle
+func (uv *UserVehicle) GetAccessInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"is_main_user": uv.IsMainUser,
+		"role":         uv.GetUserRole(),
+		"permissions":  uv.GetPermissions(),
+	}
+}
