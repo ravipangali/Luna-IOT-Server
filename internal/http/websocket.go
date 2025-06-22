@@ -660,3 +660,32 @@ func getSignalPercentage(level int) int {
 
 	return percentage
 }
+
+// BroadcastFullGPSUpdate sends the entire GPSData model to relevant clients.
+// This is the primary method for broadcasting live updates.
+func (h *WebSocketHub) BroadcastFullGPSUpdate(gpsData *models.GPSData) {
+	// The 'type' helps the client distinguish this message from others.
+	message := WebSocketMessage{
+		Type:      "gps_update",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Data:      gpsData,
+	}
+
+	payload, err := json.Marshal(message)
+	if err != nil {
+		colors.PrintError("Failed to marshal GPS update message: %v", err)
+		return
+	}
+
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	for client, clientInfo := range h.clients {
+		// Check if the client is authenticated and has permission to see this device
+		if h.isClientAuthorizedForIMEI(clientInfo, gpsData.IMEI) {
+			if err := client.WriteMessage(websocket.TextMessage, payload); err != nil {
+				colors.PrintWarning("Failed to send GPS update to client %s: %v", client.RemoteAddr(), err)
+			}
+		}
+	}
+}

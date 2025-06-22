@@ -24,105 +24,79 @@ func NewUserTrackingController() *UserTrackingController {
 func (utc *UserTrackingController) GetMyVehiclesTracking(c *gin.Context) {
 	currentUser, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"error":   "User not authenticated",
-		})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "User not authenticated"})
 		return
 	}
 	user := currentUser.(*models.User)
 
 	// Get user's accessible vehicles with live tracking permission
 	var userVehicles []models.UserVehicle
-	if err := db.GetDB().Where("user_id = ? AND is_active = ? AND (live_tracking = ? OR all_access = ?)",
-		user.ID, true, true, true).Preload("Vehicle").Find(&userVehicles).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to fetch user vehicles",
+	if err := db.GetDB().
+		Where("user_id = ? AND is_active = ? AND (live_tracking = ? OR all_access = ?)", user.ID, true, true, true).
+		Preload("Vehicle.UserAccess.User"). // Preload related data for permissions
+		Find(&userVehicles).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to fetch user vehicles"})
+		return
+	}
+
+	if len(userVehicles) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    []map[string]interface{}{},
+			"count":   0,
+			"message": "User has no accessible vehicles.",
 		})
 		return
 	}
 
-	// Manually load device for each vehicle
-	for i := range userVehicles {
-		if err := userVehicles[i].Vehicle.LoadDevice(db.GetDB()); err != nil {
-			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicles[i].Vehicle.IMEI, err)
-		}
+	// Extract all vehicle IMEIs for an efficient bulk query
+	var imeis []string
+	for _, uv := range userVehicles {
+		imeis = append(imeis, uv.VehicleID)
 	}
 
+	// Efficiently fetch the latest GPS data for all vehicles in a single query
+	var latestGpsData []models.GPSData
+	subQuery := db.GetDB().
+		Select("MAX(id) as id").
+		Model(&models.GPSData{}).
+		Where("imei IN ?", imeis).
+		Group("imei")
+
+	if err := db.GetDB().
+		Where("id IN (?)", subQuery).
+		Find(&latestGpsData).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to fetch latest GPS data"})
+		return
+	}
+
+	// Create a map for quick lookup of GPS data by IMEI
+	gpsDataMap := make(map[string]models.GPSData)
+	for _, gps := range latestGpsData {
+		gpsDataMap[gps.IMEI] = gps
+	}
+
+	// Manually load device for each vehicle and build the response
 	var trackingData []map[string]interface{}
-
-	for _, userVehicle := range userVehicles {
-		if userVehicle.IsExpired() {
-			continue
+	for i := range userVehicles {
+		vehicle := userVehicles[i].Vehicle
+		if err := vehicle.LoadDevice(db.GetDB()); err != nil {
+			colors.PrintWarning("Failed to load device for vehicle %s: %v", vehicle.IMEI, err)
+			// Continue without device info, or handle as an error
 		}
 
-		// Get latest GPS data for status
-		var latestGPS models.GPSData
-		hasStatusData := false
-		if err := db.GetDB().Where("imei = ?", userVehicle.Vehicle.IMEI).
-			Order("timestamp DESC").First(&latestGPS).Error; err == nil {
-			hasStatusData = true
-		}
-
-		// Get latest valid location data (fallback through history)
-		var locationData *models.GPSData
-		var allGPSData []models.GPSData
-		hasLocationData := false
-		if err := db.GetDB().Where("imei = ?", userVehicle.Vehicle.IMEI).
-			Order("timestamp DESC").Limit(50).Find(&allGPSData).Error; err == nil {
-
-			for _, data := range allGPSData {
-				if data.Latitude != nil && data.Longitude != nil {
-					lat := *data.Latitude
-					lng := *data.Longitude
-					if lat != 0 && lng != 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
-						locationData = &data
-						hasLocationData = true
-						break
-					}
-				}
-			}
-		}
-
-		// Determine vehicle status
-		status := "unknown"
-		if hasStatusData {
-			dataAge := time.Since(latestGPS.Timestamp).Minutes()
-			if dataAge <= 5 {
-				if latestGPS.Speed != nil && *latestGPS.Speed > 5 {
-					status = "moving"
-				} else if latestGPS.Ignition == "ON" {
-					status = "idle"
-				} else {
-					status = "stopped"
-				}
-			} else if dataAge <= 60 {
-				status = "inactive"
-			} else {
-				status = "no_data"
-			}
+		if userVehicles[i].IsExpired() {
+			continue // Skip expired vehicle access
 		}
 
 		vehicleData := map[string]interface{}{
-			"imei":              userVehicle.Vehicle.IMEI,
-			"reg_no":            userVehicle.Vehicle.RegNo,
-			"name":              userVehicle.Vehicle.Name,
-			"vehicle_type":      userVehicle.Vehicle.VehicleType,
-			"user_role":         userVehicle.GetUserRole(),
-			"permissions":       userVehicle.GetPermissions(),
-			"status":            status,
-			"has_status_data":   hasStatusData,
-			"has_location_data": hasLocationData,
-			"device":            userVehicle.Vehicle.Device,
+			"vehicle":    vehicle,
+			"latest_gps": nil, // Default to null
 		}
 
-		if hasStatusData {
-			vehicleData["latest_status"] = latestGPS
-		}
-
-		if hasLocationData {
-			vehicleData["latest_location"] = locationData
+		// If GPS data exists for this IMEI, add it to the response
+		if gpsData, ok := gpsDataMap[vehicle.IMEI]; ok {
+			vehicleData["latest_gps"] = gpsData
 		}
 
 		trackingData = append(trackingData, vehicleData)

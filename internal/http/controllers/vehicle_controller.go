@@ -563,10 +563,12 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 	}
 	user := currentUser.(*models.User)
 
-	// Get user's vehicle access
+	// Get user's vehicle access with vehicle data preloaded
 	var userVehicles []models.UserVehicle
-	if err := db.GetDB().Where("user_id = ? AND is_active = ?", user.ID, true).
-		Preload("Vehicle").Find(&userVehicles).Error; err != nil {
+	if err := db.GetDB().
+		Where("user_id = ? AND is_active = ?", user.ID, true).
+		Preload("Vehicle").
+		Find(&userVehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to fetch vehicles",
@@ -574,40 +576,67 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 		return
 	}
 
-	// Manually load device for each vehicle
-	for i := range userVehicles {
-		if err := userVehicles[i].Vehicle.LoadDevice(db.GetDB()); err != nil {
-			// If device loading fails, continue with empty device
-			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicles[i].Vehicle.IMEI, err)
-		}
+	if len(userVehicles) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    []map[string]interface{}{},
+			"count":   0,
+			"message": "User has no accessible vehicles.",
+		})
+		return
 	}
 
-	// Extract vehicles and add user role information
+	// --- Efficiently fetch latest GPS data for all vehicles ---
+	var imeis []string
+	for _, uv := range userVehicles {
+		imeis = append(imeis, uv.VehicleID)
+	}
+
+	var latestGpsData []models.GPSData
+	subQuery := db.GetDB().
+		Select("MAX(id) as id").
+		Model(&models.GPSData{}).
+		Where("imei IN ?", imeis).
+		Group("imei")
+
+	if err := db.GetDB().
+		Where("id IN (?)", subQuery).
+		Find(&latestGpsData).Error; err != nil {
+		colors.PrintError("Failed to fetch latest GPS data for my-vehicles: %v", err)
+		// Continue without GPS data, but log the error
+	}
+
+	gpsDataMap := make(map[string]models.GPSData)
+	for _, gps := range latestGpsData {
+		gpsDataMap[gps.IMEI] = gps
+	}
+	// --- End of efficient GPS data fetch ---
+
+	// Build the response
 	var vehicleList []map[string]interface{}
-	for _, userVehicle := range userVehicles {
+	for i := range userVehicles {
+		userVehicle := &userVehicles[i] // Use a pointer to modify the original item
+
 		if userVehicle.IsExpired() {
 			continue // Skip expired access
 		}
 
-		vehicleInfo := map[string]interface{}{
-			"imei":         userVehicle.Vehicle.IMEI,
-			"reg_no":       userVehicle.Vehicle.RegNo,
-			"name":         userVehicle.Vehicle.Name,
-			"vehicle_type": userVehicle.Vehicle.VehicleType,
-			"odometer":     userVehicle.Vehicle.Odometer,
-			"mileage":      userVehicle.Vehicle.Mileage,
-			"min_fuel":     userVehicle.Vehicle.MinFuel,
-			"overspeed":    userVehicle.Vehicle.Overspeed,
-			"created_at":   userVehicle.Vehicle.CreatedAt,
-			"updated_at":   userVehicle.Vehicle.UpdatedAt,
-			"device":       userVehicle.Vehicle.Device,
-			"user_role":    userVehicle.GetUserRole(),
-			"permissions":  userVehicle.GetPermissions(),
-			"is_main_user": userVehicle.IsMainUser,
-			"access_id":    userVehicle.ID,
+		// Manually load device for each vehicle
+		if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
+			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
 		}
 
-		vehicleList = append(vehicleList, vehicleInfo)
+		vehicleData := map[string]interface{}{
+			"vehicle":    userVehicle.Vehicle,
+			"latest_gps": nil, // Default to null
+		}
+
+		// Add GPS data if it exists
+		if gpsData, ok := gpsDataMap[userVehicle.Vehicle.IMEI]; ok {
+			vehicleData["latest_gps"] = gpsData
+		}
+
+		vehicleList = append(vehicleList, vehicleData)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

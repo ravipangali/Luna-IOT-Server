@@ -267,18 +267,9 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 			} else {
 				colors.PrintSuccess("GPS data saved for device %s", deviceIMEI)
 
-				// Get vehicle information for WebSocket broadcast
-				var vehicle models.Vehicle
-				vehicleName := ""
-				regNo := ""
-				if err := db.GetDB().Where("imei = ?", deviceIMEI).First(&vehicle).Error; err == nil {
-					vehicleName = vehicle.Name
-					regNo = vehicle.RegNo
-				}
-
-				// Broadcast GPS update to WebSocket clients
+				// Broadcast the new full GPS data object over WebSocket
 				if http.WSHub != nil {
-					http.WSHub.BroadcastGPSUpdate(&gpsData, vehicleName, regNo)
+					go http.WSHub.BroadcastFullGPSUpdate(&gpsData)
 				}
 			}
 		} else {
@@ -322,18 +313,9 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 		} else {
 			colors.PrintSuccess("Status data saved for device %s", deviceIMEI)
 
-			// Get vehicle information for WebSocket broadcast
-			var vehicle models.Vehicle
-			vehicleName := ""
-			regNo := ""
-			if err := db.GetDB().Where("imei = ?", deviceIMEI).First(&vehicle).Error; err == nil {
-				vehicleName = vehicle.Name
-				regNo = vehicle.RegNo
-			}
-
-			// Broadcast status update as GPS update to WebSocket clients
+			// Broadcast status update as a full GPS update to WebSocket clients
 			if http.WSHub != nil {
-				http.WSHub.BroadcastGPSUpdate(&statusData, vehicleName, regNo)
+				go http.WSHub.BroadcastFullGPSUpdate(&statusData)
 			}
 		}
 	}
