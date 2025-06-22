@@ -8,6 +8,7 @@ import (
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
+	"luna_iot_server/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -586,68 +587,127 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 		return
 	}
 
-	// --- Efficiently fetch latest GPS data for all vehicles ---
-	var imeis []string
-	for _, uv := range userVehicles {
-		imeis = append(imeis, uv.VehicleID)
-	}
-
-	var latestGpsData []models.GPSData
-	subQuery := db.GetDB().
-		Select("MAX(id) as id").
-		Model(&models.GPSData{}).
-		Where("imei IN ?", imeis).
-		Group("imei")
-
-	if err := db.GetDB().
-		Where("id IN (?)", subQuery).
-		Find(&latestGpsData).Error; err != nil {
-		colors.PrintError("Failed to fetch latest GPS data for my-vehicles: %v", err)
-		// Continue without GPS data, but log the error
-	}
-
-	gpsDataMap := make(map[string]models.GPSData)
-	for _, gps := range latestGpsData {
-		gpsDataMap[gps.IMEI] = gps
-	}
-	// --- End of efficient GPS data fetch ---
-
-	// Build the response
-	var vehicleList []map[string]interface{}
-	for i := range userVehicles {
-		userVehicle := &userVehicles[i] // Use a pointer to modify the original item
-
-		if userVehicle.IsExpired() {
-			continue // Skip expired access
-		}
-
-		// Manually load device for each vehicle
-		if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
-			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
-		}
-
+	var results []map[string]interface{}
+	for _, userVehicle := range userVehicles {
 		vehicleData := map[string]interface{}{
-			"vehicle":    userVehicle.Vehicle,
-			"latest_gps": nil, // Default to null
-			"access_info": map[string]interface{}{
-				"is_main_user": userVehicle.IsMainUser,
-				"role":         userVehicle.GetUserRole(),
-				"permissions":  userVehicle.GetPermissions(),
-			},
+			"vehicle":         userVehicle.Vehicle,
+			"latest_status":   nil, // For status data (ignition, voltage, signal, etc.)
+			"latest_location": nil, // For location data (lat, lng, speed)
+			"access_info":     userVehicle.GetAccessInfo(),
+			"today_km":        0.0,
+			"today_fuel":      0.0,
+			"total_odometer":  userVehicle.Vehicle.Odometer,
+			"last_update":     nil,
+			"since_duration":  nil,
 		}
 
-		// Add GPS data if it exists
-		if gpsData, ok := gpsDataMap[userVehicle.Vehicle.IMEI]; ok {
-			vehicleData["latest_gps"] = gpsData
+		imei := userVehicle.Vehicle.IMEI
+
+		// 1. Fetch latest status data with non-null status fields
+		var statusData *models.GPSData
+		statusQuery := `
+			SELECT * FROM gps_data 
+			WHERE imei = ? 
+			AND (voltage_level IS NOT NULL OR gsm_signal IS NOT NULL OR ignition != '' OR charger != '' OR oil_electricity != '')
+			ORDER BY timestamp DESC 
+			LIMIT 10`
+
+		var statusCandidates []models.GPSData
+		if err := db.GetDB().Raw(statusQuery, imei).Scan(&statusCandidates).Error; err == nil {
+			for _, candidate := range statusCandidates {
+				if candidate.VoltageLevel != nil || candidate.GSMSignal != nil ||
+					candidate.Ignition != "" || candidate.Charger != "" || candidate.OilElectricity != "" {
+					statusData = &candidate
+					break
+				}
+			}
 		}
 
-		vehicleList = append(vehicleList, vehicleData)
+		// 2. Fetch latest location data with non-null location fields
+		var locationData *models.GPSData
+		locationQuery := `
+			SELECT * FROM gps_data 
+			WHERE imei = ? 
+			AND latitude IS NOT NULL AND longitude IS NOT NULL
+			ORDER BY timestamp DESC 
+			LIMIT 10`
+
+		var locationCandidates []models.GPSData
+		if err := db.GetDB().Raw(locationQuery, imei).Scan(&locationCandidates).Error; err == nil {
+			for _, candidate := range locationCandidates {
+				if candidate.Latitude != nil && candidate.Longitude != nil {
+					locationData = &candidate
+					break
+				}
+			}
+		}
+
+		// 3. Calculate today's travel distance and fuel consumption
+		today := time.Now().Format("2006-01-02")
+		tomorrowStart := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+
+		var todayGPSData []models.GPSData
+		if err := db.GetDB().Where("imei = ? AND timestamp >= ? AND timestamp < ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
+			imei, today, tomorrowStart).Order("timestamp ASC").Find(&todayGPSData).Error; err == nil {
+
+			var totalDistance float64
+			if len(todayGPSData) > 1 {
+				for i := 0; i < len(todayGPSData)-1; i++ {
+					p1 := todayGPSData[i]
+					p2 := todayGPSData[i+1]
+					if p1.Latitude != nil && p1.Longitude != nil && p2.Latitude != nil && p2.Longitude != nil {
+						distance := utils.CalculateDistance(*p1.Latitude, *p1.Longitude, *p2.Latitude, *p2.Longitude)
+						totalDistance += distance
+					}
+				}
+			}
+
+			vehicleData["today_km"] = totalDistance
+
+			// Calculate fuel consumption
+			if userVehicle.Vehicle.Mileage > 0 {
+				vehicleData["today_fuel"] = totalDistance / userVehicle.Vehicle.Mileage
+			}
+		}
+
+		// 4. Calculate total odometer by adding today's distance to base odometer
+		vehicleData["total_odometer"] = userVehicle.Vehicle.Odometer + vehicleData["today_km"].(float64)
+
+		// 5. Determine last update and since duration
+		var mostRecentData *models.GPSData
+		if statusData != nil && locationData != nil {
+			if statusData.Timestamp.After(locationData.Timestamp) {
+				mostRecentData = statusData
+			} else {
+				mostRecentData = locationData
+			}
+		} else if statusData != nil {
+			mostRecentData = statusData
+		} else if locationData != nil {
+			mostRecentData = locationData
+		}
+
+		if mostRecentData != nil {
+			vehicleData["last_update"] = mostRecentData.Timestamp
+			sinceDuration := time.Since(mostRecentData.Timestamp)
+			vehicleData["since_duration"] = sinceDuration.String()
+		}
+
+		// Add the status and location data to response
+		if statusData != nil {
+			vehicleData["latest_status"] = statusData
+		}
+		if locationData != nil {
+			vehicleData["latest_location"] = locationData
+		}
+
+		results = append(results, vehicleData)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    vehicleList,
-		"count":   len(vehicleList),
+		"data":    results,
+		"count":   len(results),
 		"message": "User vehicles retrieved successfully",
 	})
 }
