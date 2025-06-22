@@ -655,7 +655,7 @@ func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSDat
 		}
 
 		if i > 0 { // Skip first point for time calculations
-			timeDiff := data.Timestamp.Sub(gpsData[i-1].Timestamp).Hours()
+			// timeDiff := data.Timestamp.Sub(gpsData[i-1].Timestamp).Hours()
 
 			if currentSpeed > 5 { // Moving
 				if movingStart == nil {
