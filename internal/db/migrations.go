@@ -172,69 +172,65 @@ func addTokenColumnsToUsers(db *gorm.DB) error {
 func fixVehicleDeviceConstraint(db *gorm.DB) error {
 	colors.PrintInfo("Checking and fixing device-vehicle foreign key constraints...")
 
-	// Remove any foreign key constraints from devices table that reference vehicles
-	// This is wrong - devices should be independent
-	colors.PrintInfo("Removing any constraints from devices table...")
+	// First, drop ALL foreign key constraints from both tables to ensure clean state
+	colors.PrintInfo("Removing ALL foreign key constraints from devices and vehicles tables...")
 
-	// Drop any constraint that might exist on devices table referencing vehicles
-	constraints := []string{
-		"fk_vehicles_device",
-		"fk_devices_vehicle",
-		"fk_device_vehicle",
-		"devices_vehicle_fkey",
-		"devices_imei_fkey",
-	}
-
-	for _, constraint := range constraints {
-		// Check if constraint exists on devices table
-		var existsOnDevices int64
-		db.Raw(`
-			SELECT COUNT(*) 
-			FROM information_schema.table_constraints 
-			WHERE constraint_name = ? 
-			AND table_name = 'devices'
-		`, constraint).Count(&existsOnDevices)
-
-		if existsOnDevices > 0 {
-			colors.PrintInfo("Found constraint '%s' on devices table, removing it...", constraint)
-			db.Exec("ALTER TABLE devices DROP CONSTRAINT IF EXISTS " + constraint)
-			colors.PrintSuccess("Removed constraint '%s' from devices table", constraint)
-		}
-
-		// Check if constraint exists on vehicles table
-		var existsOnVehicles int64
-		db.Raw(`
-			SELECT COUNT(*) 
-			FROM information_schema.table_constraints 
-			WHERE constraint_name = ? 
-			AND table_name = 'vehicles'
-		`, constraint).Count(&existsOnVehicles)
-
-		if existsOnVehicles > 0 {
-			colors.PrintInfo("Found constraint '%s' on vehicles table, removing it...", constraint)
-			db.Exec("ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS " + constraint)
-			colors.PrintSuccess("Removed constraint '%s' from vehicles table", constraint)
-		}
-	}
-
-	// Make sure devices table has no foreign key constraints
-	colors.PrintInfo("Ensuring devices table is completely independent...")
-
-	// Get all foreign key constraints on devices table
-	var fkConstraints []string
+	// Get all foreign key constraints from devices table
+	var deviceConstraints []string
 	db.Raw(`
 		SELECT constraint_name 
 		FROM information_schema.table_constraints 
 		WHERE table_name = 'devices' 
 		AND constraint_type = 'FOREIGN KEY'
-	`).Pluck("constraint_name", &fkConstraints)
+	`).Pluck("constraint_name", &deviceConstraints)
 
-	for _, fk := range fkConstraints {
-		colors.PrintInfo("Removing foreign key constraint '%s' from devices table", fk)
-		db.Exec("ALTER TABLE devices DROP CONSTRAINT IF EXISTS " + fk)
-		colors.PrintSuccess("Removed foreign key constraint '%s'", fk)
+	for _, constraint := range deviceConstraints {
+		colors.PrintInfo("Removing foreign key constraint '%s' from devices table", constraint)
+		if err := db.Exec("ALTER TABLE devices DROP CONSTRAINT IF EXISTS " + constraint).Error; err != nil {
+			colors.PrintWarning("Could not remove constraint '%s' from devices: %v", constraint, err)
+		} else {
+			colors.PrintSuccess("Removed constraint '%s' from devices table", constraint)
+		}
 	}
 
+	// Get all foreign key constraints from vehicles table
+	var vehicleConstraints []string
+	db.Raw(`
+		SELECT constraint_name 
+		FROM information_schema.table_constraints 
+		WHERE table_name = 'vehicles' 
+		AND constraint_type = 'FOREIGN KEY'
+	`).Pluck("constraint_name", &vehicleConstraints)
+
+	for _, constraint := range vehicleConstraints {
+		colors.PrintInfo("Removing foreign key constraint '%s' from vehicles table", constraint)
+		if err := db.Exec("ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS " + constraint).Error; err != nil {
+			colors.PrintWarning("Could not remove constraint '%s' from vehicles: %v", constraint, err)
+		} else {
+			colors.PrintSuccess("Removed constraint '%s' from vehicles table", constraint)
+		}
+	}
+
+	// Also try to remove common constraint names that might exist
+	commonConstraints := []string{
+		"fk_vehicles_device",
+		"fk_devices_vehicle",
+		"fk_device_vehicle",
+		"fk_vehicles_imei",
+		"devices_vehicle_fkey",
+		"devices_imei_fkey",
+		"vehicles_device_fkey",
+		"vehicles_imei_fkey",
+	}
+
+	for _, constraint := range commonConstraints {
+		// Try removing from devices table
+		db.Exec("ALTER TABLE devices DROP CONSTRAINT IF EXISTS " + constraint)
+		// Try removing from vehicles table
+		db.Exec("ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS " + constraint)
+	}
+
+	colors.PrintSuccess("✓ All foreign key constraints removed from devices and vehicles tables")
 	colors.PrintSuccess("✓ Devices table is now independent and can be created without constraints")
 	colors.PrintInfo("✓ Vehicles will reference devices via IMEI, but devices are independent")
 	return nil

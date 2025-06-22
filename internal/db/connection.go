@@ -42,6 +42,14 @@ func Initialize() error {
 func RunMigrations() error {
 	colors.PrintSubHeader("Running Database Migrations")
 
+	// IMPORTANT: Fix vehicle-device foreign key constraints BEFORE running AutoMigrate
+	// This prevents constraint violations during table creation
+	colors.PrintInfo("Pre-migration: Fixing vehicle-device constraints...")
+	if err := fixVehicleDeviceConstraint(DB); err != nil {
+		return fmt.Errorf("failed to fix vehicle-device constraint: %v", err)
+	}
+	colors.PrintSuccess("✓ Vehicle-device relationship constraints cleaned up")
+
 	// Use AutoMigrate for all models. It will create tables, add missing columns,
 	// and change column types, but it will NOT delete data.
 	colors.PrintInfo("Running Auto-Migrations for all models...")
@@ -67,12 +75,6 @@ func RunMigrations() error {
 		return fmt.Errorf("failed to update image column: %v", err)
 	}
 	colors.PrintSuccess("✓ User image column updated")
-
-	// Fix vehicle-device foreign key constraint
-	if err := fixVehicleDeviceConstraint(DB); err != nil {
-		return fmt.Errorf("failed to fix vehicle-device constraint: %v", err)
-	}
-	colors.PrintSuccess("✓ Vehicle-device relationship fixed")
 
 	// Update latitude and longitude precision
 	if err := updateLatLongPrecision(DB); err != nil {
