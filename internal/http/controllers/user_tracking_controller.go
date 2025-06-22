@@ -7,6 +7,7 @@ import (
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
+	"luna_iot_server/pkg/colors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,12 +35,19 @@ func (utc *UserTrackingController) GetMyVehiclesTracking(c *gin.Context) {
 	// Get user's accessible vehicles with live tracking permission
 	var userVehicles []models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND is_active = ? AND (live_tracking = ? OR all_access = ?)",
-		user.ID, true, true, true).Preload("Vehicle").Preload("Vehicle.Device").Find(&userVehicles).Error; err != nil {
+		user.ID, true, true, true).Preload("Vehicle").Find(&userVehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to fetch user vehicles",
 		})
 		return
+	}
+
+	// Manually load device for each vehicle
+	for i := range userVehicles {
+		if err := userVehicles[i].Vehicle.LoadDevice(db.GetDB()); err != nil {
+			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicles[i].Vehicle.IMEI, err)
+		}
 	}
 
 	var trackingData []map[string]interface{}
@@ -152,12 +160,17 @@ func (utc *UserTrackingController) GetMyVehicleTracking(c *gin.Context) {
 	// Check user access to this vehicle
 	var userVehicle models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?",
-		user.ID, imei, true).Preload("Vehicle").Preload("Vehicle.Device").First(&userVehicle).Error; err != nil {
+		user.ID, imei, true).Preload("Vehicle").First(&userVehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Vehicle not found or access denied",
 		})
 		return
+	}
+
+	// Manually load device for the vehicle
+	if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
+		colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
 	}
 
 	if userVehicle.IsExpired() {
@@ -568,12 +581,17 @@ func (utc *UserTrackingController) validateUserVehicleAccess(c *gin.Context, ime
 	// Check user access to this vehicle
 	var userVehicle models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?",
-		user.ID, imei, true).Preload("Vehicle").Preload("Vehicle.Device").First(&userVehicle).Error; err != nil {
+		user.ID, imei, true).Preload("Vehicle").First(&userVehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Vehicle not found or access denied",
 		})
 		return nil, err
+	}
+
+	// Manually load device for the vehicle
+	if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
+		colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
 	}
 
 	if userVehicle.IsExpired() {

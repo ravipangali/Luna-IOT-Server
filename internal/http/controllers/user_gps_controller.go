@@ -34,12 +34,19 @@ func (ugc *UserGPSController) GetUserVehicleTracking(c *gin.Context) {
 	// Get user's accessible vehicles
 	var userVehicles []models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND is_active = ?", user.ID, true).
-		Preload("Vehicle").Preload("Vehicle.Device").Find(&userVehicles).Error; err != nil {
+		Preload("Vehicle").Find(&userVehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to fetch user vehicles",
 		})
 		return
+	}
+
+	// Manually load device for each vehicle
+	for i := range userVehicles {
+		if err := userVehicles[i].Vehicle.LoadDevice(db.GetDB()); err != nil {
+			// If device loading fails, continue with empty device
+		}
 	}
 
 	var trackingData []map[string]interface{}

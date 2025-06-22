@@ -48,12 +48,17 @@ func (ucc *UserControlController) validateUserVehicleAccess(c *gin.Context, imei
 	// Check user access to this vehicle
 	var userVehicle models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?",
-		user.ID, imei, true).Preload("Vehicle").Preload("Vehicle.Device").First(&userVehicle).Error; err != nil {
+		user.ID, imei, true).Preload("Vehicle").First(&userVehicle).Error; err != nil {
 		response := &UserControlResponse{
 			Success: false,
 			Error:   "Vehicle not found or access denied",
 		}
 		return nil, response, err
+	}
+
+	// Manually load device for the vehicle
+	if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
+		colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
 	}
 
 	if userVehicle.IsExpired() {
@@ -310,12 +315,19 @@ func (ucc *UserControlController) GetUserActiveDevices(c *gin.Context) {
 	// Get user's accessible vehicles
 	var userVehicles []models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND is_active = ?", user.ID, true).
-		Preload("Vehicle").Preload("Vehicle.Device").Find(&userVehicles).Error; err != nil {
+		Preload("Vehicle").Find(&userVehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, UserControlResponse{
 			Success: false,
 			Error:   "Failed to fetch user vehicles",
 		})
 		return
+	}
+
+	// Manually load device for each vehicle
+	for i := range userVehicles {
+		if err := userVehicles[i].Vehicle.LoadDevice(db.GetDB()); err != nil {
+			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicles[i].Vehicle.IMEI, err)
+		}
 	}
 
 	// Get registered IMEIs from control controller

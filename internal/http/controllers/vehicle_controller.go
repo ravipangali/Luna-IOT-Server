@@ -566,12 +566,20 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 	// Get user's vehicle access
 	var userVehicles []models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND is_active = ?", user.ID, true).
-		Preload("Vehicle").Preload("Vehicle.Device").Find(&userVehicles).Error; err != nil {
+		Preload("Vehicle").Find(&userVehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to fetch vehicles",
 		})
 		return
+	}
+
+	// Manually load device for each vehicle
+	for i := range userVehicles {
+		if err := userVehicles[i].Vehicle.LoadDevice(db.GetDB()); err != nil {
+			// If device loading fails, continue with empty device
+			colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicles[i].Vehicle.IMEI, err)
+		}
 	}
 
 	// Extract vehicles and add user role information
@@ -634,12 +642,17 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 	// Check if user has access to this vehicle
 	var userVehicle models.UserVehicle
 	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?", user.ID, imei, true).
-		Preload("Vehicle").Preload("Vehicle.Device").First(&userVehicle).Error; err != nil {
+		Preload("Vehicle").First(&userVehicle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"error":   "Vehicle not found or access denied",
 		})
 		return
+	}
+
+	// Manually load device for the vehicle
+	if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
+		colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
 	}
 
 	if userVehicle.IsExpired() {
