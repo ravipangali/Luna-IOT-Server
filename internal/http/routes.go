@@ -105,6 +105,20 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			vehicles.DELETE("/:imei", middleware.AdminOnlyMiddleware(), vehicleController.DeleteVehicle) // Admin only
 		}
 
+		// Customer vehicle routes (authenticated users can manage their own vehicles)
+		customerVehicles := v1.Group("/my-vehicles")
+		customerVehicles.Use(middleware.AuthMiddleware())
+		{
+			customerVehicles.GET("", vehicleController.GetMyVehicles)                              // Get user's own vehicles
+			customerVehicles.GET("/:imei", vehicleController.GetMyVehicle)                         // Get user's specific vehicle
+			customerVehicles.POST("", vehicleController.CreateMyVehicle)                           // Create vehicle for current user
+			customerVehicles.PUT("/:imei", vehicleController.UpdateMyVehicle)                      // Update user's own vehicle
+			customerVehicles.DELETE("/:imei", vehicleController.DeleteMyVehicle)                   // Delete user's own vehicle
+			customerVehicles.GET("/:imei/share", vehicleController.GetVehicleShares)               // Get vehicle sharing info
+			customerVehicles.POST("/:imei/share", vehicleController.ShareMyVehicle)                // Share vehicle with others
+			customerVehicles.DELETE("/:imei/share/:shareId", vehicleController.RevokeVehicleShare) // Revoke vehicle share
+		}
+
 		// GPS tracking routes (authenticated users only)
 		gps := v1.Group("/gps")
 		gps.Use(middleware.AuthMiddleware())

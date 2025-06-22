@@ -548,3 +548,839 @@ func (vc *VehicleController) GetVehiclesByType(c *gin.Context) {
 		"message": "Vehicles retrieved successfully",
 	})
 }
+
+// ===== CUSTOMER VEHICLE MANAGEMENT METHODS =====
+
+// GetMyVehicles returns vehicles accessible to the current user
+func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Get user's vehicle access
+	var userVehicles []models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND is_active = ?", user.ID, true).
+		Preload("Vehicle").Preload("Vehicle.Device").Find(&userVehicles).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch vehicles",
+		})
+		return
+	}
+
+	// Extract vehicles and add user role information
+	var vehicleList []map[string]interface{}
+	for _, userVehicle := range userVehicles {
+		if userVehicle.IsExpired() {
+			continue // Skip expired access
+		}
+
+		vehicleInfo := map[string]interface{}{
+			"imei":         userVehicle.Vehicle.IMEI,
+			"reg_no":       userVehicle.Vehicle.RegNo,
+			"name":         userVehicle.Vehicle.Name,
+			"vehicle_type": userVehicle.Vehicle.VehicleType,
+			"odometer":     userVehicle.Vehicle.Odometer,
+			"mileage":      userVehicle.Vehicle.Mileage,
+			"min_fuel":     userVehicle.Vehicle.MinFuel,
+			"overspeed":    userVehicle.Vehicle.Overspeed,
+			"created_at":   userVehicle.Vehicle.CreatedAt,
+			"updated_at":   userVehicle.Vehicle.UpdatedAt,
+			"device":       userVehicle.Vehicle.Device,
+			"user_role":    userVehicle.GetUserRole(),
+			"permissions":  userVehicle.GetPermissions(),
+			"is_main_user": userVehicle.IsMainUser,
+			"access_id":    userVehicle.ID,
+		}
+
+		vehicleList = append(vehicleList, vehicleInfo)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    vehicleList,
+		"count":   len(vehicleList),
+		"message": "User vehicles retrieved successfully",
+	})
+}
+
+// GetMyVehicle returns a specific vehicle accessible to the current user
+func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid IMEI format",
+		})
+		return
+	}
+
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Check if user has access to this vehicle
+	var userVehicle models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?", user.ID, imei, true).
+		Preload("Vehicle").Preload("Vehicle.Device").First(&userVehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found or access denied",
+		})
+		return
+	}
+
+	if userVehicle.IsExpired() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Vehicle access has expired",
+		})
+		return
+	}
+
+	// Get all users with access to this vehicle (if user is main user or has share_tracking permission)
+	var users []map[string]interface{}
+	if userVehicle.IsMainUser || userVehicle.ShareTracking {
+		var allUserVehicles []models.UserVehicle
+		if err := db.GetDB().Where("vehicle_id = ? AND is_active = ?", imei, true).
+			Preload("User").Find(&allUserVehicles).Error; err == nil {
+			for _, uv := range allUserVehicles {
+				if uv.IsExpired() {
+					continue
+				}
+				userInfo := map[string]interface{}{
+					"id":           uv.User.ID,
+					"name":         uv.User.Name,
+					"email":        uv.User.Email,
+					"role":         uv.GetUserRole(),
+					"permissions":  uv.GetPermissions(),
+					"is_main_user": uv.IsMainUser,
+					"access_id":    uv.ID,
+				}
+				users = append(users, userInfo)
+			}
+		}
+	}
+
+	response := gin.H{
+		"success": true,
+		"data": map[string]interface{}{
+			"imei":         userVehicle.Vehicle.IMEI,
+			"reg_no":       userVehicle.Vehicle.RegNo,
+			"name":         userVehicle.Vehicle.Name,
+			"vehicle_type": userVehicle.Vehicle.VehicleType,
+			"odometer":     userVehicle.Vehicle.Odometer,
+			"mileage":      userVehicle.Vehicle.Mileage,
+			"min_fuel":     userVehicle.Vehicle.MinFuel,
+			"overspeed":    userVehicle.Vehicle.Overspeed,
+			"created_at":   userVehicle.Vehicle.CreatedAt,
+			"updated_at":   userVehicle.Vehicle.UpdatedAt,
+			"device":       userVehicle.Vehicle.Device,
+			"user_role":    userVehicle.GetUserRole(),
+			"permissions":  userVehicle.GetPermissions(),
+			"is_main_user": userVehicle.IsMainUser,
+			"users":        users,
+		},
+		"message": "Vehicle retrieved successfully",
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// CreateMyVehicle creates a new vehicle for the current user
+func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	var vehicle models.Vehicle
+	if err := c.ShouldBindJSON(&vehicle); err != nil {
+		colors.PrintError("Invalid JSON in vehicle creation request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request data",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	colors.PrintInfo("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s, User: %d",
+		vehicle.IMEI, vehicle.RegNo, vehicle.VehicleType, user.ID)
+
+	// Validate IMEI length
+	if len(vehicle.IMEI) != 16 {
+		colors.PrintWarning("Invalid IMEI length: %d (expected 16)", len(vehicle.IMEI))
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "IMEI must be exactly 16 digits",
+		})
+		return
+	}
+
+	// Validate IMEI contains only digits
+	for _, char := range vehicle.IMEI {
+		if char < '0' || char > '9' {
+			colors.PrintWarning("Invalid IMEI format: contains non-digit characters")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "IMEI must contain only digits",
+			})
+			return
+		}
+	}
+
+	// Validate vehicle type
+	validTypes := []models.VehicleType{
+		models.VehicleTypeBike,
+		models.VehicleTypeCar,
+		models.VehicleTypeTruck,
+		models.VehicleTypeBus,
+		models.VehicleTypeSchoolBus,
+	}
+
+	isValidType := false
+	for _, validType := range validTypes {
+		if vehicle.VehicleType == validType {
+			isValidType = true
+			break
+		}
+	}
+
+	if !isValidType {
+		colors.PrintWarning("Invalid vehicle type: %s", vehicle.VehicleType)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success":     false,
+			"error":       "Invalid vehicle type",
+			"valid_types": []string{"bike", "car", "truck", "bus", "school_bus"},
+		})
+		return
+	}
+
+	// Check if device exists
+	var device models.Device
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err != nil {
+		colors.PrintWarning("Device with IMEI %s not found in database", vehicle.IMEI)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Device with this IMEI does not exist",
+			"hint":    "Please contact admin to register the device first",
+		})
+		return
+	}
+
+	// Check if vehicle with same registration number already exists
+	var existingVehicle models.Vehicle
+	if err := db.GetDB().Where("reg_no = ?", vehicle.RegNo).First(&existingVehicle).Error; err == nil {
+		colors.PrintWarning("Vehicle with registration number %s already exists", vehicle.RegNo)
+		c.JSON(http.StatusConflict, gin.H{
+			"success": false,
+			"error":   "Vehicle with this registration number already exists",
+		})
+		return
+	}
+
+	// Check if this IMEI is already assigned to another vehicle
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&existingVehicle).Error; err == nil {
+		colors.PrintWarning("IMEI %s is already assigned to vehicle %s", vehicle.IMEI, existingVehicle.RegNo)
+		c.JSON(http.StatusConflict, gin.H{
+			"success":          false,
+			"error":            "This device is already assigned to another vehicle",
+			"existing_vehicle": existingVehicle.RegNo,
+		})
+		return
+	}
+
+	// Start transaction
+	tx := db.GetDB().Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Create the vehicle
+	if err := tx.Create(&vehicle).Error; err != nil {
+		tx.Rollback()
+		colors.PrintError("Failed to create vehicle in database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to create vehicle",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Create main user assignment for current user
+	mainUserAssignment := &models.UserVehicle{
+		UserID:        user.ID,
+		VehicleID:     vehicle.IMEI,
+		AllAccess:     true,
+		LiveTracking:  true,
+		History:       true,
+		Report:        true,
+		VehicleEdit:   true,
+		Notification:  true,
+		ShareTracking: true,
+		IsMainUser:    true,
+		GrantedBy:     user.ID,
+		GrantedAt:     time.Now(),
+		IsActive:      true,
+		Notes:         "Main user (Vehicle Owner)",
+	}
+
+	colors.PrintInfo("Creating user-vehicle assignment: UserID=%d, VehicleID=%s, GrantedBy=%d",
+		mainUserAssignment.UserID, mainUserAssignment.VehicleID, mainUserAssignment.GrantedBy)
+
+	if err := tx.Create(mainUserAssignment).Error; err != nil {
+		tx.Rollback()
+		colors.PrintError("Failed to assign main user to vehicle: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to assign main user to vehicle",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		colors.PrintError("Failed to commit vehicle creation transaction: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to complete vehicle creation",
+		})
+		return
+	}
+
+	// Load device information
+	db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device)
+	vehicle.Device = device
+
+	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s, User=%s",
+		vehicle.IMEI, vehicle.RegNo, user.Email)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data": map[string]interface{}{
+			"imei":         vehicle.IMEI,
+			"reg_no":       vehicle.RegNo,
+			"name":         vehicle.Name,
+			"vehicle_type": vehicle.VehicleType,
+			"odometer":     vehicle.Odometer,
+			"mileage":      vehicle.Mileage,
+			"min_fuel":     vehicle.MinFuel,
+			"overspeed":    vehicle.Overspeed,
+			"created_at":   vehicle.CreatedAt,
+			"updated_at":   vehicle.UpdatedAt,
+			"device":       vehicle.Device,
+			"user_role":    "Main User",
+			"permissions":  []string{"all_access", "live_tracking", "history", "report", "vehicle_edit", "notification", "share_tracking"},
+			"is_main_user": true,
+		},
+		"message": "Vehicle created successfully",
+	})
+}
+
+// UpdateMyVehicle updates a vehicle owned by the current user
+func (vc *VehicleController) UpdateMyVehicle(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid IMEI format",
+		})
+		return
+	}
+
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Check if user has edit permission for this vehicle
+	var userVehicle models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?", user.ID, imei, true).
+		First(&userVehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found or access denied",
+		})
+		return
+	}
+
+	if userVehicle.IsExpired() || (!userVehicle.VehicleEdit && !userVehicle.AllAccess) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "You don't have permission to edit this vehicle",
+		})
+		return
+	}
+
+	var vehicle models.Vehicle
+	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found",
+		})
+		return
+	}
+
+	var updateData models.Vehicle
+	if err := c.ShouldBindJSON(&updateData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request data",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Don't allow IMEI or registration number updates
+	updateData.IMEI = vehicle.IMEI
+	updateData.RegNo = vehicle.RegNo
+
+	if err := db.GetDB().Model(&vehicle).Updates(updateData).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to update vehicle",
+		})
+		return
+	}
+
+	// Load device information
+	var device models.Device
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
+		vehicle.Device = device
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": map[string]interface{}{
+			"imei":         vehicle.IMEI,
+			"reg_no":       vehicle.RegNo,
+			"name":         vehicle.Name,
+			"vehicle_type": vehicle.VehicleType,
+			"odometer":     vehicle.Odometer,
+			"mileage":      vehicle.Mileage,
+			"min_fuel":     vehicle.MinFuel,
+			"overspeed":    vehicle.Overspeed,
+			"created_at":   vehicle.CreatedAt,
+			"updated_at":   vehicle.UpdatedAt,
+			"device":       vehicle.Device,
+			"user_role":    userVehicle.GetUserRole(),
+			"permissions":  userVehicle.GetPermissions(),
+			"is_main_user": userVehicle.IsMainUser,
+		},
+		"message": "Vehicle updated successfully",
+	})
+}
+
+// DeleteMyVehicle deletes a vehicle owned by the current user (only main users can delete)
+func (vc *VehicleController) DeleteMyVehicle(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid IMEI format",
+		})
+		return
+	}
+
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Check if user is the main user of this vehicle
+	var userVehicle models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_main_user = ? AND is_active = ?",
+		user.ID, imei, true, true).First(&userVehicle).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Only the main user can delete a vehicle",
+		})
+		return
+	}
+
+	if userVehicle.IsExpired() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Vehicle access has expired",
+		})
+		return
+	}
+
+	var vehicle models.Vehicle
+	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found",
+		})
+		return
+	}
+
+	// Start transaction to delete vehicle and all related user access
+	tx := db.GetDB().Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Delete all user-vehicle relationships first
+	if err := tx.Where("vehicle_id = ?", imei).Delete(&models.UserVehicle{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to delete vehicle access records",
+		})
+		return
+	}
+
+	// Delete the vehicle
+	if err := tx.Delete(&vehicle).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to delete vehicle",
+		})
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to complete vehicle deletion",
+		})
+		return
+	}
+
+	colors.PrintSuccess("Vehicle deleted successfully: IMEI=%s, RegNo=%s, User=%s",
+		vehicle.IMEI, vehicle.RegNo, user.Email)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Vehicle deleted successfully",
+	})
+}
+
+// GetVehicleShares returns sharing information for a vehicle
+func (vc *VehicleController) GetVehicleShares(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid IMEI format",
+		})
+		return
+	}
+
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Check if user has access to this vehicle and share_tracking permission
+	var userVehicle models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?", user.ID, imei, true).
+		First(&userVehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found or access denied",
+		})
+		return
+	}
+
+	if userVehicle.IsExpired() || (!userVehicle.ShareTracking && !userVehicle.AllAccess && !userVehicle.IsMainUser) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "You don't have permission to view vehicle sharing information",
+		})
+		return
+	}
+
+	// Get all users with access to this vehicle
+	var allUserVehicles []models.UserVehicle
+	if err := db.GetDB().Where("vehicle_id = ? AND is_active = ?", imei, true).
+		Preload("User").Preload("GrantedByUser").Find(&allUserVehicles).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch vehicle sharing information",
+		})
+		return
+	}
+
+	var shares []map[string]interface{}
+	for _, uv := range allUserVehicles {
+		if uv.IsExpired() {
+			continue
+		}
+		shareInfo := map[string]interface{}{
+			"access_id":    uv.ID,
+			"user_id":      uv.User.ID,
+			"user_name":    uv.User.Name,
+			"user_email":   uv.User.Email,
+			"role":         uv.GetUserRole(),
+			"permissions":  uv.GetPermissions(),
+			"is_main_user": uv.IsMainUser,
+			"granted_at":   uv.GrantedAt,
+			"expires_at":   uv.ExpiresAt,
+			"notes":        uv.Notes,
+			"granted_by":   uv.GrantedByUser.Name,
+		}
+		shares = append(shares, shareInfo)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    shares,
+		"count":   len(shares),
+		"message": "Vehicle sharing information retrieved successfully",
+	})
+}
+
+// ShareMyVehicle shares a vehicle with another user
+func (vc *VehicleController) ShareMyVehicle(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid IMEI format",
+		})
+		return
+	}
+
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Check if user is main user or has share_tracking permission
+	var userVehicle models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?", user.ID, imei, true).
+		First(&userVehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found or access denied",
+		})
+		return
+	}
+
+	if userVehicle.IsExpired() || (!userVehicle.ShareTracking && !userVehicle.AllAccess && !userVehicle.IsMainUser) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "You don't have permission to share this vehicle",
+		})
+		return
+	}
+
+	var req struct {
+		UserID      uint            `json:"user_id" binding:"required"`
+		Permissions map[string]bool `json:"permissions" binding:"required"`
+		ExpiresAt   *time.Time      `json:"expires_at,omitempty"`
+		Notes       string          `json:"notes,omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request data",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Verify the target user exists
+	var targetUser models.User
+	if err := db.GetDB().First(&targetUser, req.UserID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Target user not found",
+		})
+		return
+	}
+
+	// Check if target user already has access
+	var existingAccess models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ?", req.UserID, imei).First(&existingAccess).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"success": false,
+			"error":   "User already has access to this vehicle",
+		})
+		return
+	}
+
+	// Create new user-vehicle relationship
+	newUserVehicle := models.UserVehicle{
+		UserID:        req.UserID,
+		VehicleID:     imei,
+		AllAccess:     req.Permissions["all_access"],
+		LiveTracking:  req.Permissions["live_tracking"],
+		History:       req.Permissions["history"],
+		Report:        req.Permissions["report"],
+		VehicleEdit:   req.Permissions["vehicle_edit"],
+		Notification:  req.Permissions["notification"],
+		ShareTracking: req.Permissions["share_tracking"],
+		IsMainUser:    false, // Shared users are never main users
+		GrantedBy:     user.ID,
+		GrantedAt:     time.Now(),
+		ExpiresAt:     req.ExpiresAt,
+		IsActive:      true,
+		Notes:         req.Notes,
+	}
+
+	if err := db.GetDB().Create(&newUserVehicle).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to share vehicle access",
+		})
+		return
+	}
+
+	// Load relationships
+	db.GetDB().Preload("User").Preload("GrantedByUser").First(&newUserVehicle, newUserVehicle.ID)
+
+	colors.PrintSuccess("Vehicle %s shared with user %s by user %s", imei, targetUser.Email, user.Email)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data": map[string]interface{}{
+			"access_id":    newUserVehicle.ID,
+			"user_id":      newUserVehicle.User.ID,
+			"user_name":    newUserVehicle.User.Name,
+			"user_email":   newUserVehicle.User.Email,
+			"role":         newUserVehicle.GetUserRole(),
+			"permissions":  newUserVehicle.GetPermissions(),
+			"is_main_user": newUserVehicle.IsMainUser,
+			"granted_at":   newUserVehicle.GrantedAt,
+			"expires_at":   newUserVehicle.ExpiresAt,
+			"notes":        newUserVehicle.Notes,
+			"granted_by":   newUserVehicle.GrantedByUser.Name,
+		},
+		"message": "Vehicle shared successfully",
+	})
+}
+
+// RevokeVehicleShare revokes access to a shared vehicle
+func (vc *VehicleController) RevokeVehicleShare(c *gin.Context) {
+	imei := c.Param("imei")
+	if len(imei) != 16 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid IMEI format",
+		})
+		return
+	}
+
+	shareId, err := strconv.ParseUint(c.Param("shareId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid share ID",
+		})
+		return
+	}
+
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	// Check if user is main user or has share_tracking permission
+	var userVehicle models.UserVehicle
+	if err := db.GetDB().Where("user_id = ? AND vehicle_id = ? AND is_active = ?", user.ID, imei, true).
+		First(&userVehicle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Vehicle not found or access denied",
+		})
+		return
+	}
+
+	if userVehicle.IsExpired() || (!userVehicle.ShareTracking && !userVehicle.AllAccess && !userVehicle.IsMainUser) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "You don't have permission to revoke vehicle access",
+		})
+		return
+	}
+
+	// Find the share to revoke
+	var shareToRevoke models.UserVehicle
+	if err := db.GetDB().Where("id = ? AND vehicle_id = ?", uint(shareId), imei).First(&shareToRevoke).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Share not found",
+		})
+		return
+	}
+
+	// Don't allow revoking main user access
+	if shareToRevoke.IsMainUser {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Cannot revoke main user access",
+		})
+		return
+	}
+
+	// Delete the share
+	if err := db.GetDB().Delete(&shareToRevoke).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to revoke access",
+		})
+		return
+	}
+
+	colors.PrintSuccess("Vehicle access revoked: IMEI=%s, ShareID=%d, RevokedBy=%s", imei, shareId, user.Email)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Vehicle access revoked successfully",
+	})
+}
