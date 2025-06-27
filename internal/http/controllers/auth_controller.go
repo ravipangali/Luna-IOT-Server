@@ -433,14 +433,14 @@ func (ac *AuthController) Me(c *gin.Context) {
 }
 
 // DeleteAccount handles account deactivation (soft delete)
-// @Summary Deactivate user account
-// @Description Deactivates the currently authenticated user's account by setting is_active to false. Requires password confirmation.
+// @Summary delete user account
+// @Description deletes the currently authenticated user's account by setting is_active to false. Requires password confirmation.
 // @Tags auth
 // @Accept json
 // @Produce json
 // @Param request body DeleteAccountRequest true "Password for confirmation"
 // @Security BearerAuth
-// @Success 200 {object} AuthResponse "Account deactivated successfully"
+// @Success 200 {object} AuthResponse "Account deleted successfully"
 // @Failure 400 {object} AuthResponse "Invalid request"
 // @Failure 401 {object} AuthResponse "Unauthorized or invalid password"
 // @Failure 500 {object} AuthResponse "Internal server error"
@@ -468,7 +468,7 @@ func (ac *AuthController) DeleteAccount(c *gin.Context) {
 
 	// Verify password
 	if !user.CheckPassword(req.Password) {
-		colors.PrintWarning("Account deactivation failed: Invalid password for user %s", user.Email)
+		colors.PrintWarning("Account deleted failed: Invalid password for user %s", user.Email)
 		c.JSON(http.StatusUnauthorized, AuthResponse{
 			Success: false,
 			Error:   "Invalid password",
@@ -477,22 +477,22 @@ func (ac *AuthController) DeleteAccount(c *gin.Context) {
 		return
 	}
 
-	// Deactivate account
+	// delete account
 	if err := db.GetDB().Model(&user).Update("is_active", false).Error; err != nil {
-		colors.PrintError("Failed to deactivate account for user %s: %v", user.Email, err)
+		colors.PrintError("Failed to delete account for user %s: %v", user.Email, err)
 		c.JSON(http.StatusInternalServerError, AuthResponse{
 			Success: false,
-			Error:   "Failed to deactivate account",
+			Error:   "Failed to delete account",
 			Message: "An internal error occurred. Please try again later.",
 		})
 		return
 	}
 
-	colors.PrintSuccess("Account deactivated for user %s (ID: %d)", user.Email, user.ID)
+	colors.PrintSuccess("Account deleted for user %s (ID: %d)", user.Email, user.ID)
 
 	c.JSON(http.StatusOK, AuthResponse{
 		Success: true,
-		Message: "Your account has been successfully deactivated.",
+		Message: "Your account has been successfully deleted.",
 	})
 }
 
