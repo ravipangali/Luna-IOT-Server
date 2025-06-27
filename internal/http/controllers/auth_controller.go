@@ -101,6 +101,17 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
+	// Check if user is active
+	if !user.IsActive {
+		colors.PrintWarning("Login failed: User account is not active for phone %s", req.Phone)
+		c.JSON(http.StatusUnauthorized, AuthResponse{
+			Success: false,
+			Error:   "Account not active",
+			Message: "Your account is not active. Please contact an administrator.",
+		})
+		return
+	}
+
 	// Check password
 	if !user.CheckPassword(req.Password) {
 		colors.PrintWarning("Login failed: Invalid password for phone %s", req.Phone)

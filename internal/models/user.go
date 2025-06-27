@@ -26,6 +26,7 @@ type User struct {
 	Password  string         `json:"password" gorm:"size:255;not null" validate:"required,min=6"`
 	Role      UserRole       `json:"role" gorm:"type:integer;not null;default:1" validate:"required,oneof=0 1"`
 	Image     string         `json:"image" gorm:"type:text"`
+	IsActive  bool           `json:"is_active" gorm:"default:false"`
 	Token     string         `json:"-" gorm:"size:255;uniqueIndex"` // Authentication token (hidden from JSON)
 	TokenExp  *time.Time     `json:"-" gorm:"index"`                // Token expiration time
 	CreatedAt time.Time      `json:"created_at"`
@@ -122,8 +123,9 @@ func (u *User) ToSafeUser() map[string]interface{} {
 		"phone":          u.Phone,
 		"email":          u.Email,
 		"role":           u.Role,
-		"role_name":      u.GetRoleString(),
 		"image":          u.Image,
+		"is_active":      u.IsActive,
+		"role_name":      u.GetRoleString(),
 		"vehicle_access": u.VehicleAccess,
 		"vehicles":       u.Vehicles,
 		"created_at":     u.CreatedAt,
