@@ -56,6 +56,11 @@ type RegisterRequest struct {
 	OTP      string          `json:"otp,omitempty" binding:"required,len=6"`
 }
 
+// DeleteAccountRequest represents the request body for deleting an account
+type DeleteAccountRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
 // AuthResponse represents the authentication response
 type AuthResponse struct {
 	Success bool                   `json:"success"`
@@ -424,6 +429,70 @@ func (ac *AuthController) Me(c *gin.Context) {
 		Success: true,
 		Message: "User information retrieved successfully",
 		User:    user.ToSafeUser(),
+	})
+}
+
+// DeleteAccount handles account deactivation (soft delete)
+// @Summary Deactivate user account
+// @Description Deactivates the currently authenticated user's account by setting is_active to false. Requires password confirmation.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body DeleteAccountRequest true "Password for confirmation"
+// @Security BearerAuth
+// @Success 200 {object} AuthResponse "Account deactivated successfully"
+// @Failure 400 {object} AuthResponse "Invalid request"
+// @Failure 401 {object} AuthResponse "Unauthorized or invalid password"
+// @Failure 500 {object} AuthResponse "Internal server error"
+// @Router /auth/delete-account [post]
+func (ac *AuthController) DeleteAccount(c *gin.Context) {
+	currentUser, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, AuthResponse{
+			Success: false,
+			Error:   "User not authenticated",
+		})
+		return
+	}
+	user := currentUser.(*models.User)
+
+	var req DeleteAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, AuthResponse{
+			Success: false,
+			Error:   "Invalid request format",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Verify password
+	if !user.CheckPassword(req.Password) {
+		colors.PrintWarning("Account deactivation failed: Invalid password for user %s", user.Email)
+		c.JSON(http.StatusUnauthorized, AuthResponse{
+			Success: false,
+			Error:   "Invalid password",
+			Message: "The provided password is incorrect.",
+		})
+		return
+	}
+
+	// Deactivate account
+	if err := db.GetDB().Model(&user).Update("is_active", false).Error; err != nil {
+		colors.PrintError("Failed to deactivate account for user %s: %v", user.Email, err)
+		c.JSON(http.StatusInternalServerError, AuthResponse{
+			Success: false,
+			Error:   "Failed to deactivate account",
+			Message: "An internal error occurred. Please try again later.",
+		})
+		return
+	}
+
+	colors.PrintSuccess("Account deactivated for user %s (ID: %d)", user.Email, user.ID)
+
+	c.JSON(http.StatusOK, AuthResponse{
+		Success: true,
+		Message: "Your account has been successfully deactivated.",
 	})
 }
 

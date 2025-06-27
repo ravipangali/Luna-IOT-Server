@@ -57,6 +57,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			authProtected.POST("/logout", authController.Logout)
 			authProtected.GET("/me", authController.Me)
 			authProtected.POST("/refresh", authController.RefreshToken)
+			authProtected.POST("/delete-account", authController.DeleteAccount)
 		}
 
 		// User routes (admin only for most operations)
