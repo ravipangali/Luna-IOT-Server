@@ -166,7 +166,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				switch packet.ProtocolName {
 				case "LOGIN":
 					deviceIMEI = s.handleLoginPacket(packet, conn)
-				case "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
+				case "GPS_LBS", "GPS_LBS_STATUS", "GPS_LBS_DATA", "GPS_LBS_STATUS_A0":
 					s.handleGPSPacket(packet, conn, deviceIMEI)
 				case "STATUS_INFO":
 					s.handleStatusPacket(packet, conn, deviceIMEI)
