@@ -117,22 +117,37 @@ type StartInfo struct {
 
 // NewGT06Decoder creates a new GT06 decoder instance
 func NewGT06Decoder() *GT06Decoder {
-	return &GT06Decoder{
-		buffer:      make([]byte, 0),
-		startBits78: []byte{0x78, 0x78}, // Standard packets
-		startBits79: []byte{0x79, 0x79}, // Extended packets
+	d := GT06Decoder{
+		startBits78: []byte{0x78, 0x78},
+		startBits79: []byte{0x79, 0x79},
 		stopBits:    []byte{0x0D, 0x0A},
-		protocolNumbers: map[byte]string{
-			0x01: "LOGIN",
-			0x12: "GPS_LBS_STATUS",
-			0x13: "STATUS_INFO",
-			0x15: "STRING_INFO",
-			0x16: "ALARM_DATA",
-			0x1A: "GPS_LBS_DATA",
-			0xA0: "GPS_LBS_STATUS_A0",
-		},
-		responseRequired: []byte{0x01, 0x21, 0x15, 0x16, 0x18, 0x19},
 	}
+
+	d.protocolNumbers = map[byte]string{
+		0x01: "LOGIN",
+		0x12: "GPS_LBS", // Standard GPS/LBS data
+		0x13: "STATUS_INFO",
+		0x15: "STRING_INFO",
+		0x16: "ALARM_DATA",
+		0x1A: "GPS_LBS_STATUS",
+		0x22: "GPS_LBS", // GPS Data Packet, same as 0x12
+		0x26: "LBS_PHONE",
+		0x27: "LBS_WIFI",
+		0x2C: "WIFI_STATUS",
+		0x80: "COMMAND_RESPONSE",
+		0x94: "INFO_TRANSMISSION",
+	}
+
+	d.responseRequired = []byte{
+		0x01, // Login
+		0x21, // Login response
+		0x15, // String info response
+		0x16, // Alarm data response
+		0x18, // Command response
+		0x19, // Command response
+	}
+
+	return &d
 }
 
 // AddData adds new data to the buffer and processes it
@@ -245,7 +260,7 @@ func (d *GT06Decoder) decodePacket(packet []byte) (*DecodedPacket, error) {
 	switch packet[protocolOffset] {
 	case 0x01:
 		d.decodeLogin(dataPayload, result)
-	case 0x12, 0x22, 0xA0, 0x1A:
+	case 0x12, 0x1A, 0x22:
 		d.decodeGPSLBS(dataPayload, result)
 	case 0x13:
 		d.decodeStatusInfo(dataPayload, result)
