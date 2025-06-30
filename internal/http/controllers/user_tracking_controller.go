@@ -200,7 +200,7 @@ func (utc *UserTrackingController) GetMyVehicleTracking(c *gin.Context) {
 	db.GetDB().Where("imei = ? AND timestamp >= ?", imei, startOfDay).
 		Order("timestamp ASC").Find(&todayData)
 
-	stats := utc.calculateVehicleStats(todayData)
+	stats := utc.calculateVehicleStats(todayData, userVehicle.Vehicle.Overspeed)
 
 	response := gin.H{
 		"success": true,
@@ -453,7 +453,7 @@ func (utc *UserTrackingController) GetMyVehicleRoute(c *gin.Context) {
 	}
 
 	// Calculate route statistics
-	stats := utc.calculateVehicleStats(gpsData)
+	stats := utc.calculateVehicleStats(gpsData, userVehicle.Vehicle.Overspeed)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -515,7 +515,7 @@ func (utc *UserTrackingController) GetMyVehicleReports(c *gin.Context) {
 			continue
 		}
 
-		stats := utc.calculateVehicleStats(gpsData)
+		stats := utc.calculateVehicleStats(gpsData, userVehicle.Vehicle.Overspeed)
 
 		vehicleReport := map[string]interface{}{
 			"imei":         userVehicle.Vehicle.IMEI,
@@ -590,140 +590,115 @@ func (utc *UserTrackingController) validateUserVehicleAccess(c *gin.Context, ime
 	return &userVehicle, nil
 }
 
+type vehicleState int
+
+const (
+	stateUnknown vehicleState = iota
+	stateOverspeed
+	stateRunning
+	stateIdle
+	stateStopped
+)
+
+func getVehicleState(data models.GPSData, overspeedThreshold int) vehicleState {
+	speed := 0
+	if data.Speed != nil {
+		speed = *data.Speed
+	}
+	ignitionOn := data.Ignition == "ON"
+
+	if speed > overspeedThreshold {
+		return stateOverspeed
+	}
+	if speed > 5 {
+		return stateRunning
+	}
+	if ignitionOn {
+		return stateIdle
+	}
+	return stateStopped
+}
+
 // Helper function to calculate vehicle statistics
-func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSData) map[string]interface{} {
-	if len(gpsData) == 0 {
+func (utc *UserTrackingController) calculateVehicleStats(gpsData []models.GPSData, vehicleOverspeed int) map[string]interface{} {
+	if len(gpsData) < 2 {
 		return map[string]interface{}{
-			"total_points":       0,
-			"total_distance":     0.0,
-			"max_speed":          0,
-			"avg_speed":          0.0,
-			"ignition_on_hours":  0.0,
-			"moving_time_hours":  0.0,
-			"idle_time_hours":    0.0,
-			"stopped_time_hours": 0.0,
+			"total_points":         0,
+			"total_distance":       0.0,
+			"max_speed":            0,
+			"avg_speed":            0.0,
+			"ignition_on_hours":    0.0,
+			"moving_time_hours":    0.0,
+			"running_time_hours":   0.0,
+			"overspeed_time_hours": 0.0,
+			"idle_time_hours":      0.0,
+			"stopped_time_hours":   0.0,
 		}
 	}
 
 	totalPoints := len(gpsData)
 	var totalDistance float64
-	if len(gpsData) > 1 {
-		for i := 0; i < len(gpsData)-1; i++ {
-			p1 := gpsData[i]
-			p2 := gpsData[i+1]
+	maxSpeed := 0
+
+	var totalIgnitionOnTime, movingTime, runningTime, overspeedTime, idleTime, stoppedTime time.Duration
+
+	// Calculate total distance and max speed first
+	for i := 0; i < len(gpsData); i++ {
+		if gpsData[i].Speed != nil && *gpsData[i].Speed > maxSpeed {
+			maxSpeed = *gpsData[i].Speed
+		}
+		if i > 0 {
+			p1 := gpsData[i-1]
+			p2 := gpsData[i]
 			if p1.Latitude != nil && p1.Longitude != nil && p2.Latitude != nil && p2.Longitude != nil {
 				totalDistance += utils.CalculateDistance(*p1.Latitude, *p1.Longitude, *p2.Latitude, *p2.Longitude)
 			}
 		}
 	}
 
-	maxSpeed := 0
-	totalIgnitionOnTime := 0.0
-	movingTime := 0.0
-	idleTime := 0.0
-	stoppedTime := 0.0
+	// Calculate state durations
+	for i := 1; i < len(gpsData); i++ {
+		p1 := gpsData[i-1]
+		p2 := gpsData[i]
+		duration := p2.Timestamp.Sub(p1.Timestamp)
 
-	var lastPoint *models.GPSData
-	var ignitionOnStart *time.Time
-	var movingStart *time.Time
-	var idleStart *time.Time
-	var stoppedStart *time.Time
+		// State is determined by the starting point of the interval
+		state := getVehicleState(p1, vehicleOverspeed)
 
-	for i, data := range gpsData {
-		// Track max speed
-		if data.Speed != nil && *data.Speed > maxSpeed {
-			maxSpeed = *data.Speed
+		switch state {
+		case stateOverspeed:
+			overspeedTime += duration
+		case stateRunning:
+			runningTime += duration
+		case stateIdle:
+			idleTime += duration
+		case stateStopped:
+			stoppedTime += duration
 		}
 
-		// Track ignition time
-		if data.Ignition == "ON" && ignitionOnStart == nil {
-			ignitionOnStart = &data.Timestamp
-		} else if data.Ignition == "OFF" && ignitionOnStart != nil {
-			totalIgnitionOnTime += data.Timestamp.Sub(*ignitionOnStart).Hours()
-			ignitionOnStart = nil
-		}
-
-		// Track vehicle states (moving, idle, stopped)
-		currentSpeed := 0
-		if data.Speed != nil {
-			currentSpeed = *data.Speed
-		}
-
-		if i > 0 { // Skip first point for time calculations
-			// timeDiff := data.Timestamp.Sub(gpsData[i-1].Timestamp).Hours()
-
-			if currentSpeed > 5 { // Moving
-				if movingStart == nil {
-					movingStart = &gpsData[i-1].Timestamp
-				}
-				if idleStart != nil {
-					idleTime += data.Timestamp.Sub(*idleStart).Hours()
-					idleStart = nil
-				}
-				if stoppedStart != nil {
-					stoppedTime += data.Timestamp.Sub(*stoppedStart).Hours()
-					stoppedStart = nil
-				}
-			} else if data.Ignition == "ON" { // Idle
-				if idleStart == nil {
-					idleStart = &gpsData[i-1].Timestamp
-				}
-				if movingStart != nil {
-					movingTime += data.Timestamp.Sub(*movingStart).Hours()
-					movingStart = nil
-				}
-				if stoppedStart != nil {
-					stoppedTime += data.Timestamp.Sub(*stoppedStart).Hours()
-					stoppedStart = nil
-				}
-			} else { // Stopped
-				if stoppedStart == nil {
-					stoppedStart = &gpsData[i-1].Timestamp
-				}
-				if movingStart != nil {
-					movingTime += data.Timestamp.Sub(*movingStart).Hours()
-					movingStart = nil
-				}
-				if idleStart != nil {
-					idleTime += data.Timestamp.Sub(*idleStart).Hours()
-					idleStart = nil
-				}
-			}
-		}
-
-		lastPoint = &data
-	}
-
-	// Handle any remaining time periods
-	if lastPoint != nil {
-		if ignitionOnStart != nil {
-			totalIgnitionOnTime += lastPoint.Timestamp.Sub(*ignitionOnStart).Hours()
-		}
-		if movingStart != nil {
-			movingTime += lastPoint.Timestamp.Sub(*movingStart).Hours()
-		}
-		if idleStart != nil {
-			idleTime += lastPoint.Timestamp.Sub(*idleStart).Hours()
-		}
-		if stoppedStart != nil {
-			stoppedTime += lastPoint.Timestamp.Sub(*stoppedStart).Hours()
+		// Independently calculate ignition on time
+		if p1.Ignition == "ON" {
+			totalIgnitionOnTime += duration
 		}
 	}
 
+	movingTime = runningTime + overspeedTime
 	avgSpeed := 0.0
-	if movingTime > 0 {
-		avgSpeed = totalDistance / movingTime
+	if movingTime.Hours() > 0 {
+		avgSpeed = totalDistance / movingTime.Hours()
 	}
 
 	stats := map[string]interface{}{
-		"total_points":       totalPoints,
-		"total_distance":     totalDistance,
-		"max_speed":          maxSpeed,
-		"avg_speed":          avgSpeed,
-		"ignition_on_hours":  totalIgnitionOnTime,
-		"moving_time_hours":  movingTime,
-		"idle_time_hours":    idleTime,
-		"stopped_time_hours": stoppedTime,
+		"total_points":         totalPoints,
+		"total_distance":       totalDistance,
+		"max_speed":            maxSpeed,
+		"avg_speed":            avgSpeed,
+		"ignition_on_hours":    totalIgnitionOnTime.Hours(),
+		"moving_time_hours":    movingTime.Hours(),
+		"running_time_hours":   runningTime.Hours(),
+		"overspeed_time_hours": overspeedTime.Hours(),
+		"idle_time_hours":      idleTime.Hours(),
+		"stopped_time_hours":   stoppedTime.Hours(),
 	}
 
 	return stats
