@@ -244,7 +244,7 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 	// Reset body for binding
 	c.Request.Body = io.NopCloser(strings.NewReader(string(body)))
 
-	var updateData models.User
+	var updateData map[string]interface{}
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid request data",
@@ -252,75 +252,48 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	colors.PrintInfo("Updating user: ID=%d, Name=%s, Email=%s, Role=%d",
-		user.ID, updateData.Name, updateData.Email, updateData.Role)
+	colors.PrintInfo("Updating user: ID=%d, Data: %v", user.ID, updateData)
 
 	// Image validation
-	if updateData.Image != "" && updateData.Image != user.Image {
-		// Check if image is a valid base64 string
-		if !strings.HasPrefix(updateData.Image, "data:image/") {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid image format",
-			})
+	if image, ok := updateData["image"].(string); ok && image != "" && image != user.Image {
+		if !strings.HasPrefix(image, "data:image/") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image format"})
 			return
 		}
-
-		// Check image size (roughly estimate base64 size)
-		if len(updateData.Image) > 7*1024*1024 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Image size too large, max 5MB allowed",
-			})
+		if len(image) > 7*1024*1024 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Image size too large, max 5MB allowed"})
 			return
 		}
-
-		colors.PrintInfo("User image updated (size: %d bytes)", len(updateData.Image))
+		colors.PrintInfo("User image updated (size: %d bytes)", len(image))
 	}
 
-	// Special handling for password updates
-	hasPasswordField := false
-	for _, field := range []string{"password", "Password"} {
-		if strings.Contains(string(body), field) {
-			hasPasswordField = true
-			break
-		}
-	}
-
-	// If password field is present in the request but empty or invalid, don't update it
-	if hasPasswordField {
-		if strings.TrimSpace(updateData.Password) == "" {
-			colors.PrintInfo("Password field is empty in update request, ignoring password update")
-			updateData.Password = user.Password // Keep the original password
-		} else if len(updateData.Password) < 6 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Password must be at least 6 characters",
-			})
+	// Handle password update
+	if password, ok := updateData["password"].(string); ok {
+		if strings.TrimSpace(password) == "" {
+			delete(updateData, "password") // Remove empty password from update data
+			colors.PrintInfo("Password field is empty, ignoring password update")
+		} else if len(password) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 6 characters"})
 			return
 		} else {
 			colors.PrintInfo("Password update detected for user ID=%d", user.ID)
-			// Password will be hashed by the User model's BeforeUpdate hook
+			// The BeforeUpdate hook will handle hashing
 		}
-	} else {
-		// No password field in request, keep original password
-		updateData.Password = user.Password
 	}
 
 	// Validate email and phone uniqueness if they changed
-	if updateData.Email != user.Email {
+	if email, ok := updateData["email"].(string); ok && email != user.Email {
 		var existingUser models.User
-		if err := db.GetDB().Where("email = ? AND id != ?", updateData.Email, user.ID).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "Email already in use by another user",
-			})
+		if err := db.GetDB().Where("email = ? AND id != ?", email, user.ID).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Email already in use by another user"})
 			return
 		}
 	}
 
-	if updateData.Phone != user.Phone {
+	if phone, ok := updateData["phone"].(string); ok && phone != user.Phone {
 		var existingUser models.User
-		if err := db.GetDB().Where("phone = ? AND id != ?", updateData.Phone, user.ID).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "Phone number already in use by another user",
-			})
+		if err := db.GetDB().Where("phone = ? AND id != ?", phone, user.ID).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Phone number already in use by another user"})
 			return
 		}
 	}
@@ -332,6 +305,10 @@ func (uc *UserController) UpdateUser(c *gin.Context) {
 		})
 		return
 	}
+
+	// Important: We need to reload the user from the database to get the updated fields
+	// because `Updates` with a map doesn't update the original `user` struct in-place.
+	db.GetDB().First(&user, uint(id))
 
 	// Clear password before returning response
 	user.Password = ""
