@@ -57,13 +57,28 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 
 // BeforeUpdate hook to hash password before updating
 func (u *User) BeforeUpdate(tx *gorm.DB) error {
-	if tx.Statement.Changed("Password") && u.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
-		if err != nil {
-			return err
+	// Only hash password if it has been changed.
+	// When using `Updates` with a struct, GORM keeps the update data in `tx.Statement.Dest`.
+	if updateModel, ok := tx.Statement.Dest.(*User); ok {
+		if updateModel.Password != "" {
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(updateModel.Password), bcrypt.DefaultCost)
+			if err != nil {
+				return err
+			}
+			// Use SetColumn to update the password field for the SQL query.
+			// This is safer for `Updates` as it avoids issues with other zero-value fields.
+			tx.Statement.SetColumn("password", string(hashedPassword))
 		}
-		u.Password = string(hashedPassword)
+	} else if updateMap, ok := tx.Statement.Dest.(map[string]interface{}); ok {
+		if password, passOk := updateMap["password"].(string); passOk && password != "" {
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+			if err != nil {
+				return err
+			}
+			tx.Statement.SetColumn("password", string(hashedPassword))
+		}
 	}
+
 	return nil
 }
 
