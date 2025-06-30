@@ -56,11 +56,6 @@ type RegisterRequest struct {
 	OTP      string          `json:"otp,omitempty" binding:"required,len=6"`
 }
 
-// DeleteAccountRequest represents the request body for deleting an account
-type DeleteAccountRequest struct {
-	Password string `json:"password" binding:"required"`
-}
-
 // AuthResponse represents the authentication response
 type AuthResponse struct {
 	Success bool                   `json:"success"`
@@ -438,13 +433,13 @@ func (ac *AuthController) Me(c *gin.Context) {
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param request body DeleteAccountRequest true "Password for confirmation"
+// @Param password query string true "Password for confirmation"
 // @Security BearerAuth
 // @Success 200 {object} AuthResponse "Account deleted successfully"
 // @Failure 400 {object} AuthResponse "Invalid request"
 // @Failure 401 {object} AuthResponse "Unauthorized or invalid password"
 // @Failure 500 {object} AuthResponse "Internal server error"
-// @Router /auth/delete-account [post]
+// @Router /auth/delete-account [get]
 func (ac *AuthController) DeleteAccount(c *gin.Context) {
 	currentUser, exists := c.Get("user")
 	if !exists {
@@ -456,18 +451,18 @@ func (ac *AuthController) DeleteAccount(c *gin.Context) {
 	}
 	user := currentUser.(*models.User)
 
-	var req DeleteAccountRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	password := c.Query("password")
+	if password == "" {
 		c.JSON(http.StatusBadRequest, AuthResponse{
 			Success: false,
-			Error:   "Invalid request format",
-			Message: err.Error(),
+			Error:   "Password is required",
+			Message: "Password must be provided as a query parameter.",
 		})
 		return
 	}
 
 	// Verify password
-	if !user.CheckPassword(req.Password) {
+	if !user.CheckPassword(password) {
 		colors.PrintWarning("Account deleted failed: Invalid password for user %s", user.Email)
 		c.JSON(http.StatusUnauthorized, AuthResponse{
 			Success: false,
