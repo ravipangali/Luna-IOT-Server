@@ -134,8 +134,12 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	// Save token to database
-	if err := db.GetDB().Save(&user).Error; err != nil {
+	// Save token to database by updating only token fields
+	// This prevents the BeforeUpdate hook from re-hashing the password
+	if err := db.GetDB().Model(&user).Updates(map[string]interface{}{
+		"token":     user.Token,
+		"token_exp": user.TokenExp,
+	}).Error; err != nil {
 		colors.PrintError("Failed to save token for user %s: %v", req.Phone, err)
 		c.JSON(http.StatusInternalServerError, AuthResponse{
 			Success: false,
@@ -517,8 +521,11 @@ func (ac *AuthController) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Save new token
-	if err := db.GetDB().Save(user).Error; err != nil {
+	// Save new token by updating only token-related fields
+	if err := db.GetDB().Model(&user).Updates(map[string]interface{}{
+		"token":     user.Token,
+		"token_exp": user.TokenExp,
+	}).Error; err != nil {
 		colors.PrintError("Failed to save refreshed token for user %s: %v", user.Email, err)
 		c.JSON(http.StatusInternalServerError, AuthResponse{
 			Success: false,
