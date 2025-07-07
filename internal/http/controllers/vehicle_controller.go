@@ -166,12 +166,12 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	imei := c.Param("imei")
 
 	// Log the IMEI received
-	fmt.Println(colors.Yellow("Received IMEI:"), colors.Green(imei))
+	fmt.Println(colors.Yellow + "Received IMEI: " + colors.Green + imei + colors.Reset)
 
 	var vehicle models.Vehicle
 	if err := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle).Error; err != nil {
 		// Log the error if vehicle is not found
-		fmt.Println(colors.Red("Error fetching vehicle:"), err.Error())
+		fmt.Println(colors.Red + "Error fetching vehicle: " + err.Error() + colors.Reset)
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Vehicle not found",
 		})
@@ -179,7 +179,7 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	}
 
 	// Log successful vehicle fetch
-	fmt.Println(colors.Green("Successfully fetched vehicle:"), colors.Cyan(vehicle.IMEI))
+	fmt.Println(colors.Green + "Successfully fetched vehicle: " + colors.Cyan + vehicle.IMEI + colors.Reset)
 
 	// Load user access information with user details
 	var userAccess []models.UserVehicle
