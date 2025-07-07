@@ -1,9 +1,5 @@
 package config
 
-import (
-	"os"
-)
-
 // SMSConfig holds the configuration for the SMS service
 type SMSConfig struct {
 	APIKey     string
@@ -27,9 +23,3 @@ func GetSMSConfig() *SMSConfig {
 // Helper function to get environment variables with a fallback
 // This is duplicated from database.go but is kept here for modularity.
 // In a larger application, this could be moved to a shared util package.
-func getEnv(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
