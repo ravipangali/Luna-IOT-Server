@@ -1451,12 +1451,16 @@ func (vc *VehicleController) RevokeVehicleShare(c *gin.Context) {
 // ForceDeleteVehiclesBackupData permanently deletes all soft-deleted vehicles
 func (vc *VehicleController) ForceDeleteVehiclesBackupData(c *gin.Context) {
 	gormDB := db.GetDB()
+	var deletedVehicles []models.Vehicle
 
-	// Count records to be deleted for confirmation
-	var deletedVehicles int64
-	gormDB.Unscoped().Model(&models.Vehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedVehicles)
+	// Find all soft-deleted vehicles
+	if err := gormDB.Unscoped().Where("deleted_at IS NOT NULL").Find(&deletedVehicles).Error; err != nil {
+		colors.PrintError("Failed to find soft-deleted vehicles: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find soft-deleted vehicles"})
+		return
+	}
 
-	if deletedVehicles == 0 {
+	if len(deletedVehicles) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"success":       true,
 			"message":       "No deleted vehicle backup data found to force delete",
@@ -1465,19 +1469,44 @@ func (vc *VehicleController) ForceDeleteVehiclesBackupData(c *gin.Context) {
 		return
 	}
 
-	// Perform the permanent deletion
-	result := gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.Vehicle{})
+	// Get the IMEIs of the vehicles to be deleted
+	var imeis []string
+	for _, v := range deletedVehicles {
+		imeis = append(imeis, v.IMEI)
+	}
+
+	// Start a transaction
+	tx := gormDB.Begin()
+
+	// Delete associated UserVehicle records
+	if err := tx.Unscoped().Where("vehicle_id IN ?", imeis).Delete(&models.UserVehicle{}).Error; err != nil {
+		tx.Rollback()
+		colors.PrintError("Failed to force delete user-vehicle associations: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete user-vehicle associations"})
+		return
+	}
+
+	// Perform the permanent deletion of vehicles
+	result := tx.Unscoped().Where("imei IN ?", imeis).Delete(&models.Vehicle{})
 	if result.Error != nil {
+		tx.Rollback()
 		colors.PrintError("Failed to force delete vehicles: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete vehicle backup data"})
 		return
 	}
 
-	colors.PrintSuccess("Force deleted %d vehicles permanently", deletedVehicles)
+	if err := tx.Commit().Error; err != nil {
+		colors.PrintError("Failed to commit transaction for force deleting vehicles: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction for force deleting vehicles"})
+		return
+	}
+
+	deletedCount := len(deletedVehicles)
+	colors.PrintSuccess("Force deleted %d vehicles and their associations permanently", deletedCount)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":       true,
-		"message":       "Vehicle backup data has been permanently removed",
-		"deleted_count": deletedVehicles,
+		"message":       "Vehicle backup data and associations have been permanently removed",
+		"deleted_count": deletedCount,
 	})
 }
