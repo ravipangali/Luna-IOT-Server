@@ -267,24 +267,25 @@ func (h *WebSocketHub) isClientAuthorizedForIMEI(clientInfo *ClientInfo, imei st
 // BroadcastGPSUpdate sends GPS data updates to all connected clients
 func (h *WebSocketHub) BroadcastGPSUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
 	// Check if this is location data or status data
+	// For location data, we need valid coordinates AND speed
 	hasValidCoordinates := false
-	if gpsData.Latitude != nil && gpsData.Longitude != nil {
+	if gpsData.Latitude != nil && gpsData.Longitude != nil && gpsData.Speed != nil {
 		lat := *gpsData.Latitude
 		lng := *gpsData.Longitude
 		hasValidCoordinates = lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat != 0 && lng != 0
 	}
 
 	if hasValidCoordinates {
-		// This is location data - broadcast as location update
+		// This is location data with valid coordinates and speed - broadcast as location update
 		h.BroadcastLocationUpdate(gpsData, vehicleName, regNo)
 	} else {
-		// This is status data - broadcast as status update
+		// This is status data or has missing speed - broadcast as status update
 		h.BroadcastStatusUpdate(gpsData, vehicleName, regNo)
 	}
 }
 
 // BroadcastLocationUpdate sends location data updates to all connected clients
-// Only broadcasts when valid coordinates are present
+// Only broadcasts when valid coordinates AND speed are present
 func (h *WebSocketHub) BroadcastLocationUpdate(gpsData *models.GPSData, vehicleName, regNo string) {
 	// Get vehicle information for overspeed checking
 	var vehicle models.Vehicle
@@ -293,18 +294,23 @@ func (h *WebSocketHub) BroadcastLocationUpdate(gpsData *models.GPSData, vehicleN
 		vehicleType = string(vehicle.VehicleType)
 	}
 
-	// CRITICAL CHECK: Only broadcast if we have valid GPS coordinates
+	// CRITICAL CHECK: Only broadcast if we have valid GPS coordinates AND speed
 	locationValid := false
-	if gpsData.Latitude != nil && gpsData.Longitude != nil {
+	if gpsData.Latitude != nil && gpsData.Longitude != nil && gpsData.Speed != nil {
 		lat := *gpsData.Latitude
 		lng := *gpsData.Longitude
 		locationValid = lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && lat != 0 && lng != 0
 	}
 
-	// If coordinates are invalid or null, don't broadcast location update
+	// If coordinates/speed are invalid or null, don't broadcast location update
 	if !locationValid {
-		colors.PrintWarning("📍 Not broadcasting location update for IMEI %s - invalid or null coordinates (lat=%v, lng=%v)",
-			gpsData.IMEI, gpsData.Latitude, gpsData.Longitude)
+		if gpsData.Speed == nil {
+			colors.PrintWarning("📍 Not broadcasting location update for IMEI %s - speed is null (indicates unreliable GPS)",
+				gpsData.IMEI)
+		} else {
+			colors.PrintWarning("📍 Not broadcasting location update for IMEI %s - invalid or null coordinates (lat=%v, lng=%v)",
+				gpsData.IMEI, gpsData.Latitude, gpsData.Longitude)
+		}
 		return
 	}
 

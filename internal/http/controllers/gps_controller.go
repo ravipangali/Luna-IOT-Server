@@ -311,7 +311,7 @@ func (gc *GPSController) GetGPSRoute(c *gin.Context) {
 	}
 
 	var gpsData []models.GPSData
-	if err := db.GetDB().Where("imei = ? AND timestamp BETWEEN ? AND ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
+	if err := db.GetDB().Where("imei = ? AND timestamp BETWEEN ? AND ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND speed IS NOT NULL",
 		imei, fromTime, toTime).
 		Order("timestamp ASC").
 		Find(&gpsData).Error; err != nil {

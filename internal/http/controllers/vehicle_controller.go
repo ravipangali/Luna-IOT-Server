@@ -647,7 +647,7 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 		tomorrowStart := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
 
 		var todayGPSData []models.GPSData
-		if err := db.GetDB().Where("imei = ? AND timestamp >= ? AND timestamp < ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
+		if err := db.GetDB().Where("imei = ? AND timestamp >= ? AND timestamp < ? AND latitude IS NOT NULL AND longitude IS NOT NULL AND speed IS NOT NULL",
 			imei, today, tomorrowStart).Order("timestamp ASC").Find(&todayGPSData).Error; err == nil {
 
 			var totalDistance float64

@@ -236,9 +236,13 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 
 	// Enhanced GPS validation to prevent zigzag routes
 	var hasValidGPS bool
-	if packet.Latitude != nil && packet.Longitude != nil {
+	if packet.Latitude != nil && packet.Longitude != nil && packet.Speed != nil {
 		lat := *packet.Latitude
 		lng := *packet.Longitude
+		speed := *packet.Speed
+
+		// Only process GPS data when speed is not null - this prevents many invalid coordinates
+		colors.PrintData("🌍", "Processing GPS with speed: Lat=%.12f, Lng=%.12f, Speed=%d km/h", lat, lng, speed)
 
 		// Convert negative latitude to positive (remove minus sign)
 		if lat < 0 {
@@ -253,13 +257,20 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 
 			if isValidGPS {
 				hasValidGPS = true
-				colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%v km/h",
-					lat, lng, packet.Speed)
+				colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%d km/h",
+					lat, lng, speed)
 			} else {
 				colors.PrintWarning("📍 GPS point rejected (accuracy filter): Lat=%.12f, Lng=%.12f", lat, lng)
 			}
 		} else {
 			colors.PrintWarning("📍 Invalid GPS coordinates (out of range): Lat=%.12f, Lng=%.12f", lat, lng)
+		}
+	} else {
+		// Log why GPS data was skipped
+		if packet.Latitude == nil || packet.Longitude == nil {
+			colors.PrintWarning("⚠️ Skipping GPS: Missing coordinates (Lat=%v, Lng=%v)", packet.Latitude, packet.Longitude)
+		} else if packet.Speed == nil {
+			colors.PrintWarning("⚠️ Skipping GPS: Speed is null (indicates unreliable GPS data)")
 		}
 	}
 
