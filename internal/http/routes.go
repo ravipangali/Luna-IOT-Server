@@ -192,7 +192,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			userGPS.GET("/:imei/history", userGPSController.GetUserVehicleHistory)
 
 			// Get GPS route data
-			userGPS.GET("/:imei/route", userGPS.GetUserVehicleRoute)
+			userGPS.GET("/:imei/route", userGPSController.GetUserVehicleRoute)
 
 			// Get GPS reports
 			userGPS.GET("/:imei/report", userGPSController.GetUserVehicleReport)
