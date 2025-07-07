@@ -9,6 +9,7 @@ import (
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
 	"luna_iot_server/pkg/colors"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -233,7 +234,7 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
 
-	// Validate and process GPS coordinates before saving
+	// Enhanced GPS validation to prevent zigzag routes
 	var hasValidGPS bool
 	if packet.Latitude != nil && packet.Longitude != nil {
 		lat := *packet.Latitude
@@ -245,12 +246,18 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 			packet.Latitude = &lat
 		}
 
-		// Accept both negative and positive longitude values
-		// Latitude: 0-90 (positive only), Longitude: -180 to +180 (both negative/positive)
+		// Basic coordinate range validation
 		if lat > 0 && lat <= 90 && lng >= -180 && lng <= 180 {
-			hasValidGPS = true
-			colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%v km/h",
-				lat, lng, packet.Speed)
+			// Additional validation to prevent zigzag routes
+			isValidGPS := s.validateGPSAccuracy(deviceIMEI, lat, lng, packet)
+
+			if isValidGPS {
+				hasValidGPS = true
+				colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%v km/h",
+					lat, lng, packet.Speed)
+			} else {
+				colors.PrintWarning("📍 GPS point rejected (accuracy filter): Lat=%.12f, Lng=%.12f", lat, lng)
+			}
 		} else {
 			colors.PrintWarning("📍 Invalid GPS coordinates (out of range): Lat=%.12f, Lng=%.12f", lat, lng)
 		}
@@ -276,6 +283,93 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 			colors.PrintWarning("Skipping GPS data save due to invalid coordinates")
 		}
 	}
+}
+
+// validateGPSAccuracy performs advanced GPS validation to prevent zigzag routes
+func (s *Server) validateGPSAccuracy(imei string, lat, lng float64, packet *protocol.DecodedPacket) bool {
+	// Get the latest GPS point for this device
+	var lastGPS models.GPSData
+	if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
+		imei).Order("timestamp DESC").First(&lastGPS).Error; err != nil {
+		// No previous GPS data, accept first point
+		return true
+	}
+
+	// Calculate distance between points
+	distance := s.calculateDistance(*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
+
+	// Calculate time difference in seconds
+	timeDiff := packet.Timestamp.Sub(lastGPS.Timestamp).Seconds()
+
+	// Skip validation if time difference is too small (less than 5 seconds)
+	if timeDiff < 5 {
+		return distance < 100 // Accept only if within 100 meters for very recent points
+	}
+
+	// Calculate required speed in km/h to cover this distance
+	requiredSpeed := (distance / 1000) / (timeDiff / 3600) // Convert to km/h
+
+	// Get current speed from packet (default to 0 if not available)
+	currentSpeed := 0
+	if packet.Speed != nil {
+		currentSpeed = int(*packet.Speed)
+	}
+
+	// Validation rules to prevent zigzag routes:
+
+	// 1. Reject points that would require impossible speeds (>200 km/h for normal vehicles)
+	if requiredSpeed > 200 {
+		colors.PrintWarning("GPS rejected: Required speed %.1f km/h too high (distance: %.1fm, time: %.1fs)",
+			requiredSpeed, distance, timeDiff)
+		return false
+	}
+
+	// 2. Reject points with unrealistic distance jumps (>1km) for stopped/slow vehicles
+	if currentSpeed < 5 && distance > 1000 {
+		colors.PrintWarning("GPS rejected: Large distance jump %.1fm while vehicle stopped/slow (speed: %d km/h)",
+			distance, currentSpeed)
+		return false
+	}
+
+	// 3. Reject points that are too far from reported speed
+	maxAllowedSpeed := float64(currentSpeed) * 3 // Allow 3x reported speed for tolerance
+	if maxAllowedSpeed > 0 && requiredSpeed > maxAllowedSpeed {
+		colors.PrintWarning("GPS rejected: Required speed %.1f km/h much higher than reported %d km/h",
+			requiredSpeed, currentSpeed)
+		return false
+	}
+
+	// 4. Check for GPS accuracy issues - reject points requiring >150km/h in urban areas
+	// (Assuming most tracking happens in urban/suburban areas)
+	if requiredSpeed > 150 && distance < 10000 { // Short distance but high speed = likely GPS error
+		colors.PrintWarning("GPS rejected: Likely GPS accuracy issue (speed: %.1f km/h, distance: %.1fm)",
+			requiredSpeed, distance)
+		return false
+	}
+
+	colors.PrintData("🔍", "GPS validation passed: distance=%.1fm, time=%.1fs, required_speed=%.1f km/h, reported_speed=%d km/h",
+		distance, timeDiff, requiredSpeed, currentSpeed)
+
+	return true
+}
+
+// calculateDistance calculates the distance between two GPS points in meters
+func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
+	const earthRadius = 6371000 // Earth radius in meters
+
+	// Convert degrees to radians
+	lat1Rad := lat1 * math.Pi / 180
+	lat2Rad := lat2 * math.Pi / 180
+	deltaLat := (lat2 - lat1) * math.Pi / 180
+	deltaLng := (lng2 - lng1) * math.Pi / 180
+
+	// Haversine formula
+	a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+		math.Cos(lat1Rad)*math.Cos(lat2Rad)*
+			math.Sin(deltaLng/2)*math.Sin(deltaLng/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return earthRadius * c
 }
 
 // handleStatusPacket processes device status packets
