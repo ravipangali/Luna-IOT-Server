@@ -734,7 +734,6 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 	err := db.GetDB().
 		Joins("JOIN user_vehicles ON user_vehicles.vehicle_id = vehicles.imei").
 		Where("user_vehicles.user_id = ? AND user_vehicles.vehicle_id = ? AND user_vehicles.is_active = ?", userID, imei, true).
-		Preload("Device").
 		Preload("UserAccess.User").
 		First(&vehicle).Error
 
@@ -743,6 +742,12 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 			"error": "Vehicle not found or you don't have access",
 		})
 		return
+	}
+
+	// Manually load the device information
+	if err := vehicle.LoadDevice(db.GetDB()); err != nil {
+		// Log the error but don't fail the request, device info is optional
+		colors.PrintWarning("Could not load device for vehicle %s: %v", vehicle.IMEI, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
