@@ -720,7 +720,13 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 
 // GetMyVehicle returns a specific vehicle accessible to the current user
 func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
-	userID := c.MustGet("userID").(uint)
+	userID_iface, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userID := userID_iface.(uint)
+
 	imei := c.Param("imei")
 
 	var vehicle models.Vehicle
