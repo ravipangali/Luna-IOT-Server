@@ -22,6 +22,8 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	vehicleController := controllers.NewVehicleController()
 	userVehicleController := controllers.NewUserVehicleController()
 	gpsController := controllers.NewGPSController()
+	userTrackingController := controllers.NewUserTrackingController()
+	dashboardController := controllers.NewDashboardController()
 
 	// Use shared control controller if provided, otherwise create new one
 	var controlController *controllers.ControlController
@@ -32,7 +34,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	}
 
 	// Initialize user-based controllers
-	userTrackingController := controllers.NewUserTrackingController()
 	userControlController := controllers.NewUserControlController(controlController)
 	userGPSController := controllers.NewUserGPSController()
 
@@ -191,7 +192,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			userGPS.GET("/:imei/history", userGPSController.GetUserVehicleHistory)
 
 			// Get GPS route data
-			userGPS.GET("/:imei/route", userGPSController.GetUserVehicleRoute)
+			userGPS.GET("/:imei/route", userGPS.GetUserVehicleRoute)
 
 			// Get GPS reports
 			userGPS.GET("/:imei/report", userGPSController.GetUserVehicleReport)
@@ -252,6 +253,13 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			// View routes (users can view their own access, admins can view all)
 			userVehicles.GET("/user/:user_id", userVehicleController.GetUserVehicleAccess)       // Will be restricted by middleware
 			userVehicles.GET("/vehicle/:vehicle_id", userVehicleController.GetVehicleUserAccess) // Will be restricted by middleware
+		}
+
+		// Dashboard routes
+		dashboard := v1.Group("/dashboard")
+		dashboard.Use(middleware.AuthMiddleware(), middleware.AdminOnlyMiddleware())
+		{
+			dashboard.GET("/stats", dashboardController.GetDashboardStats)
 		}
 	}
 
