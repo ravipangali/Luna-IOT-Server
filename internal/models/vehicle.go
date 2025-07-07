@@ -33,11 +33,11 @@ type Vehicle struct {
 
 	// Relationship - Reference device by IMEI but no foreign key constraint
 	// This allows devices to be created independently
-	Device Device `json:"device,omitempty" gorm:"-"`
+	Device Device `json:"device,omitempty" gorm:"foreignKey:IMEI;references:IMEI"`
 
 	// User relationships - many-to-many with users through UserVehicle
-	UserAccess []UserVehicle `json:"user_access,omitempty" gorm:"foreignKey:VehicleID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Users      []User        `json:"users,omitempty" gorm:"many2many:user_vehicles;foreignKey:IMEI;joinForeignKey:VehicleID;References:ID;joinReferences:UserID"`
+	UserAccess []UserVehicle `json:"user_access,omitempty" gorm:"foreignKey:VehicleID;references:IMEI"`
+	Users      []User        `json:"-" gorm:"many2many:user_vehicles;foreignKey:IMEI;joinForeignKey:VehicleID;References:ID;joinReferences:UserID"`
 }
 
 // TableName specifies the table name for Vehicle model
