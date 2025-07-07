@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 )
 
 // DatabaseConfig holds database configuration
@@ -36,9 +35,9 @@ func (c *DatabaseConfig) GetDSN() string {
 }
 
 // getEnv gets environment variable with fallback
-func getEnv(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
+// func getEnv(key, fallback string) string {
+// 	if value := os.Getenv(key); value != "" {
+// 		return value
+// 	}
+// 	return fallback
+// }
