@@ -720,12 +720,13 @@ func (vc *VehicleController) GetMyVehicles(c *gin.Context) {
 
 // GetMyVehicle returns a specific vehicle accessible to the current user
 func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
-	userID_iface, exists := c.Get("userID")
+	// Retrieve the user from the context.
+	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 		return
 	}
-	userID := userID_iface.(uint)
+	currentUser := user.(*models.User)
 
 	imei := c.Param("imei")
 
@@ -733,7 +734,7 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 	// Find the vehicle and ensure the user has access to it
 	err := db.GetDB().
 		Joins("JOIN user_vehicles ON user_vehicles.vehicle_id = vehicles.imei").
-		Where("user_vehicles.user_id = ? AND user_vehicles.vehicle_id = ? AND user_vehicles.is_active = ?", userID, imei, true).
+		Where("user_vehicles.user_id = ? AND user_vehicles.vehicle_id = ? AND user_vehicles.is_active = ?", currentUser.ID, imei, true).
 		Preload("UserAccess.User").
 		First(&vehicle).Error
 
