@@ -35,6 +35,9 @@ type Vehicle struct {
 	// This allows devices to be created independently
 	Device Device `json:"device,omitempty" gorm:"-"`
 
+	// Latest GPS data - not stored in the vehicles table, loaded on-the-fly
+	LatestGps *GpsData `json:"latest_gps,omitempty" gorm:"-"`
+
 	// User relationships - many-to-many with users through UserVehicle
 	UserAccess []UserVehicle `json:"user_access,omitempty" gorm:"foreignKey:VehicleID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Users      []User        `json:"users,omitempty" gorm:"many2many:user_vehicles;foreignKey:IMEI;joinForeignKey:VehicleID;References:ID;joinReferences:UserID"`

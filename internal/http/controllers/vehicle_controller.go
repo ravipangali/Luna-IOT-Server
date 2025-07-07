@@ -73,7 +73,7 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 
 	// Get vehicles with pagination
 	var vehicles []models.Vehicle
-	if err := query.Limit(limit).Offset(offset).Find(&vehicles).Error; err != nil {
+	if err := query.Limit(limit).Offset(offset).Order("created_at DESC").Find(&vehicles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to fetch vehicles",
 		})
@@ -92,6 +92,12 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 		var userAccess []models.UserVehicle
 		if err := db.GetDB().Preload("User").Where("vehicle_id = ? AND is_active = ?", vehicles[i].IMEI, true).Find(&userAccess).Error; err == nil {
 			vehicles[i].UserAccess = userAccess
+		}
+
+		// Load latest GPS data
+		var latestGps models.GpsData
+		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).Order("created_at DESC").First(&latestGps).Error; err == nil {
+			vehicles[i].LatestGps = &latestGps
 		}
 	}
 
@@ -117,6 +123,20 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 			}
 		}
 
+		// Prepare GPS data for the response
+		var gpsData map[string]interface{}
+		if vehicle.LatestGps != nil {
+			gpsData = map[string]interface{}{
+				"latitude":    vehicle.LatestGps.Latitude,
+				"longitude":   vehicle.LatestGps.Longitude,
+				"speed":       vehicle.LatestGps.Speed,
+				"course":      vehicle.LatestGps.Course,
+				"ignition":    vehicle.LatestGps.Ignition,
+				"satellites":  vehicle.LatestGps.Satellites,
+				"last_update": vehicle.LatestGps.CreatedAt,
+			}
+		}
+
 		vehicleInfo := map[string]interface{}{
 			"imei":              vehicle.IMEI,
 			"reg_no":            vehicle.RegNo,
@@ -133,6 +153,7 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 			"shared_user_count": sharedUserCount,
 			"total_user_count":  mainUserCount + sharedUserCount,
 			"main_user_name":    mainUserName,
+			"latest_gps":        gpsData,
 		}
 
 		vehicleList = append(vehicleList, vehicleInfo)
