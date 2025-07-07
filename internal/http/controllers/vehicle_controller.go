@@ -95,7 +95,7 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 		}
 
 		// Load latest GPS data
-		var latestGps models.GpsData
+		var latestGps models.GPSData
 		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).Order("created_at DESC").First(&latestGps).Error; err == nil {
 			vehicles[i].LatestGps = &latestGps
 		}
