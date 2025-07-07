@@ -56,6 +56,12 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 		query = query.Where("imei LIKE ?", "%"+imei+"%")
 	}
 
+	if userId := c.Query("userId"); userId != "" {
+		// If userId is provided, filter vehicles for that user
+		query = query.Joins("JOIN user_vehicles ON user_vehicles.vehicle_id = vehicles.imei").
+			Where("user_vehicles.user_id = ? AND user_vehicles.is_active = ?", userId, true)
+	}
+
 	// Get total count for pagination
 	var totalCount int64
 	if err := query.Model(&models.Vehicle{}).Count(&totalCount).Error; err != nil {
