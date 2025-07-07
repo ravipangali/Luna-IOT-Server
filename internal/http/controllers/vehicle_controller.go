@@ -1,13 +1,13 @@
 package controllers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
-	"luna_iot_server/pkg/colors"
 	"luna_iot_server/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -83,15 +83,15 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 	// Load additional data for each vehicle
 	for i := range vehicles {
 		// Load device information
-		var device models.Device
-		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).First(&device).Error; err == nil {
-			vehicles[i].Device = device
+		if err := db.GetDB().Where("imei = ?", vehicles[i].IMEI).First(&vehicles[i].Device).Error; err != nil {
+			// Log error but continue
+			log.Printf("Failed to load device for vehicle %s: %v", vehicles[i].IMEI, err)
 		}
 
 		// Load user access information
-		var userAccess []models.UserVehicle
-		if err := db.GetDB().Preload("User").Where("vehicle_id = ? AND is_active = ?", vehicles[i].IMEI, true).Find(&userAccess).Error; err == nil {
-			vehicles[i].UserAccess = userAccess
+		if err := db.GetDB().Preload("User").Where("vehicle_id = ? AND is_active = ?", vehicles[i].IMEI, true).Find(&vehicles[i].UserAccess).Error; err != nil {
+			// Log error but continue
+			log.Printf("Failed to load user access for vehicle %s: %v", vehicles[i].IMEI, err)
 		}
 
 		// Load latest GPS data
@@ -153,7 +153,24 @@ func (vc *VehicleController) GetVehicles(c *gin.Context) {
 			"shared_user_count": sharedUserCount,
 			"total_user_count":  mainUserCount + sharedUserCount,
 			"main_user_name":    mainUserName,
-			"latest_gps":        gpsData,
+			// Flatten latest GPS data into the main object
+			"latitude":    nil,
+			"longitude":   nil,
+			"speed":       0,
+			"course":      0,
+			"ignition":    "OFF",
+			"satellites":  0,
+			"last_update": nil,
+		}
+
+		if vehicle.LatestGps != nil {
+			vehicleInfo["latitude"] = vehicle.LatestGps.Latitude
+			vehicleInfo["longitude"] = vehicle.LatestGps.Longitude
+			vehicleInfo["speed"] = vehicle.LatestGps.Speed
+			vehicleInfo["course"] = vehicle.LatestGps.Course
+			vehicleInfo["ignition"] = vehicle.LatestGps.Ignition
+			vehicleInfo["satellites"] = vehicle.LatestGps.Satellites
+			vehicleInfo["last_update"] = vehicle.LatestGps.CreatedAt
 		}
 
 		vehicleList = append(vehicleList, vehicleInfo)
@@ -272,7 +289,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&requestData); err != nil {
-		colors.PrintError("Invalid JSON in vehicle creation request: %v", err)
+		log.Printf("Invalid JSON in vehicle creation request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid request data",
 			"details": err.Error(),
@@ -284,13 +301,13 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	vehicle := requestData.Vehicle
 	mainUserID := requestData.MainUserID
 
-	colors.PrintInfo("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s, MainUser: %d",
+	log.Printf("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s, MainUser: %d",
 		vehicle.IMEI, vehicle.RegNo, vehicle.VehicleType, mainUserID)
 
 	// Validate main user exists
 	var mainUser models.User
 	if err := db.GetDB().First(&mainUser, mainUserID).Error; err != nil {
-		colors.PrintWarning("Main user with ID %d not found", mainUserID)
+		log.Printf("Main user with ID %d not found", mainUserID)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Main user not found",
 			"message": "The specified main user does not exist",
@@ -300,7 +317,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 
 	// Validate IMEI length
 	if len(vehicle.IMEI) != 16 {
-		colors.PrintWarning("Invalid IMEI length: %d (expected 16)", len(vehicle.IMEI))
+		log.Printf("Invalid IMEI length: %d (expected 16)", len(vehicle.IMEI))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "IMEI must be exactly 16 digits",
 		})
@@ -310,7 +327,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Validate IMEI contains only digits
 	for _, char := range vehicle.IMEI {
 		if char < '0' || char > '9' {
-			colors.PrintWarning("Invalid IMEI format: contains non-digit characters")
+			log.Printf("Invalid IMEI format: contains non-digit characters")
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "IMEI must contain only digits",
 			})
@@ -336,7 +353,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	}
 
 	if !isValidType {
-		colors.PrintWarning("Invalid vehicle type: %s", vehicle.VehicleType)
+		log.Printf("Invalid vehicle type: %s", vehicle.VehicleType)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":       "Invalid vehicle type",
 			"valid_types": []string{"bike", "car", "truck", "bus", "school_bus"},
@@ -347,7 +364,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Check if device exists
 	var device models.Device
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err != nil {
-		colors.PrintWarning("Device with IMEI %s not found in database", vehicle.IMEI)
+		log.Printf("Device with IMEI %s not found in database", vehicle.IMEI)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Device with this IMEI does not exist",
 			"hint":  "Please register the device first",
@@ -358,7 +375,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Check if vehicle with same registration number already exists
 	var existingVehicle models.Vehicle
 	if err := db.GetDB().Where("reg_no = ?", vehicle.RegNo).First(&existingVehicle).Error; err == nil {
-		colors.PrintWarning("Vehicle with registration number %s already exists", vehicle.RegNo)
+		log.Printf("Vehicle with registration number %s already exists", vehicle.RegNo)
 		c.JSON(http.StatusConflict, gin.H{
 			"error": "Vehicle with this registration number already exists",
 		})
@@ -367,7 +384,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 
 	// Check if this IMEI is already assigned to another vehicle
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&existingVehicle).Error; err == nil {
-		colors.PrintWarning("IMEI %s is already assigned to vehicle %s", vehicle.IMEI, existingVehicle.RegNo)
+		log.Printf("IMEI %s is already assigned to vehicle %s", vehicle.IMEI, existingVehicle.RegNo)
 		c.JSON(http.StatusConflict, gin.H{
 			"error":            "This device is already assigned to another vehicle",
 			"existing_vehicle": existingVehicle.RegNo,
@@ -387,7 +404,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Verify the grantedBy user exists (for foreign key constraint)
 	var grantedByUser models.User
 	if err := db.GetDB().First(&grantedByUser, grantedBy).Error; err != nil {
-		colors.PrintWarning("GrantedBy user with ID %d not found, using main user", grantedBy)
+		log.Printf("GrantedBy user with ID %d not found, using main user", grantedBy)
 		grantedBy = mainUserID
 	}
 
@@ -402,7 +419,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Create the vehicle
 	if err := tx.Create(&vehicle).Error; err != nil {
 		tx.Rollback()
-		colors.PrintError("Failed to create vehicle in database: %v", err)
+		log.Printf("Failed to create vehicle in database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to create vehicle",
 			"details": err.Error(),
@@ -428,12 +445,12 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 		Notes:         "Main user (Vehicle Owner)",
 	}
 
-	colors.PrintInfo("Creating user-vehicle assignment: UserID=%d, VehicleID=%s, GrantedBy=%d",
+	log.Printf("Creating user-vehicle assignment: UserID=%d, VehicleID=%s, GrantedBy=%d",
 		mainUserAssignment.UserID, mainUserAssignment.VehicleID, mainUserAssignment.GrantedBy)
 
 	if err := tx.Create(mainUserAssignment).Error; err != nil {
 		tx.Rollback()
-		colors.PrintError("Failed to assign main user to vehicle: %v", err)
+		log.Printf("Failed to assign main user to vehicle: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to assign main user to vehicle",
 			"details": err.Error(),
@@ -443,7 +460,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		colors.PrintError("Failed to commit vehicle creation transaction: %v", err)
+		log.Printf("Failed to commit vehicle creation transaction: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to complete vehicle creation",
 		})
@@ -457,7 +474,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 	// Load user access information
 	db.GetDB().Preload("User").Where("vehicle_id = ?", vehicle.IMEI).Find(&vehicle.UserAccess)
 
-	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s, MainUser=%s",
+	log.Printf("Vehicle created successfully: IMEI=%s, RegNo=%s, MainUser=%s",
 		vehicle.IMEI, vehicle.RegNo, mainUser.Email)
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -773,7 +790,7 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 
 	// Manually load device for the vehicle
 	if err := userVehicle.Vehicle.LoadDevice(db.GetDB()); err != nil {
-		colors.PrintWarning("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
+		log.Printf("Failed to load device for vehicle %s: %v", userVehicle.Vehicle.IMEI, err)
 	}
 
 	if userVehicle.IsExpired() {
@@ -847,7 +864,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 
 	var vehicle models.Vehicle
 	if err := c.ShouldBindJSON(&vehicle); err != nil {
-		colors.PrintError("Invalid JSON in vehicle creation request: %v", err)
+		log.Printf("Invalid JSON in vehicle creation request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "Invalid request data",
@@ -856,12 +873,12 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 		return
 	}
 
-	colors.PrintInfo("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s, User: %d",
+	log.Printf("Creating vehicle with IMEI: %s, RegNo: %s, Type: %s, User: %d",
 		vehicle.IMEI, vehicle.RegNo, vehicle.VehicleType, user.ID)
 
 	// Validate IMEI length
 	if len(vehicle.IMEI) != 16 {
-		colors.PrintWarning("Invalid IMEI length: %d (expected 16)", len(vehicle.IMEI))
+		log.Printf("Invalid IMEI length: %d (expected 16)", len(vehicle.IMEI))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "IMEI must be exactly 16 digits",
@@ -872,7 +889,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 	// Validate IMEI contains only digits
 	for _, char := range vehicle.IMEI {
 		if char < '0' || char > '9' {
-			colors.PrintWarning("Invalid IMEI format: contains non-digit characters")
+			log.Printf("Invalid IMEI format: contains non-digit characters")
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
 				"error":   "IMEI must contain only digits",
@@ -899,7 +916,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 	}
 
 	if !isValidType {
-		colors.PrintWarning("Invalid vehicle type: %s", vehicle.VehicleType)
+		log.Printf("Invalid vehicle type: %s", vehicle.VehicleType)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success":     false,
 			"error":       "Invalid vehicle type",
@@ -911,7 +928,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 	// Check if device exists
 	var device models.Device
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err != nil {
-		colors.PrintWarning("Device with IMEI %s not found in database", vehicle.IMEI)
+		log.Printf("Device with IMEI %s not found in database", vehicle.IMEI)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "Device with this IMEI does not exist",
@@ -923,7 +940,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 	// Check if vehicle with same registration number already exists
 	var existingVehicle models.Vehicle
 	if err := db.GetDB().Where("reg_no = ?", vehicle.RegNo).First(&existingVehicle).Error; err == nil {
-		colors.PrintWarning("Vehicle with registration number %s already exists", vehicle.RegNo)
+		log.Printf("Vehicle with registration number %s already exists", vehicle.RegNo)
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"error":   "Vehicle with this registration number already exists",
@@ -933,7 +950,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 
 	// Check if this IMEI is already assigned to another vehicle
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&existingVehicle).Error; err == nil {
-		colors.PrintWarning("IMEI %s is already assigned to vehicle %s", vehicle.IMEI, existingVehicle.RegNo)
+		log.Printf("IMEI %s is already assigned to vehicle %s", vehicle.IMEI, existingVehicle.RegNo)
 		c.JSON(http.StatusConflict, gin.H{
 			"success":          false,
 			"error":            "This device is already assigned to another vehicle",
@@ -953,7 +970,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 	// Create the vehicle
 	if err := tx.Create(&vehicle).Error; err != nil {
 		tx.Rollback()
-		colors.PrintError("Failed to create vehicle in database: %v", err)
+		log.Printf("Failed to create vehicle in database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to create vehicle",
@@ -980,12 +997,12 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 		Notes:         "Main user (Vehicle Owner)",
 	}
 
-	colors.PrintInfo("Creating user-vehicle assignment: UserID=%d, VehicleID=%s, GrantedBy=%d",
+	log.Printf("Creating user-vehicle assignment: UserID=%d, VehicleID=%s, GrantedBy=%d",
 		mainUserAssignment.UserID, mainUserAssignment.VehicleID, mainUserAssignment.GrantedBy)
 
 	if err := tx.Create(mainUserAssignment).Error; err != nil {
 		tx.Rollback()
-		colors.PrintError("Failed to assign main user to vehicle: %v", err)
+		log.Printf("Failed to assign main user to vehicle: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to assign main user to vehicle",
@@ -996,7 +1013,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		colors.PrintError("Failed to commit vehicle creation transaction: %v", err)
+		log.Printf("Failed to commit vehicle creation transaction: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to complete vehicle creation",
@@ -1008,7 +1025,7 @@ func (vc *VehicleController) CreateMyVehicle(c *gin.Context) {
 	db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device)
 	vehicle.Device = device
 
-	colors.PrintSuccess("Vehicle created successfully: IMEI=%s, RegNo=%s, User=%s",
+	log.Printf("Vehicle created successfully: IMEI=%s, RegNo=%s, User=%s",
 		vehicle.IMEI, vehicle.RegNo, user.Email)
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -1218,7 +1235,7 @@ func (vc *VehicleController) DeleteMyVehicle(c *gin.Context) {
 		return
 	}
 
-	colors.PrintSuccess("Vehicle deleted successfully: IMEI=%s, RegNo=%s, User=%s",
+	log.Printf("Vehicle deleted successfully: IMEI=%s, RegNo=%s, User=%s",
 		vehicle.IMEI, vehicle.RegNo, user.Email)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1413,7 +1430,7 @@ func (vc *VehicleController) ShareMyVehicle(c *gin.Context) {
 	// Load relationships
 	db.GetDB().Preload("User").Preload("GrantedByUser").First(&newUserVehicle, newUserVehicle.ID)
 
-	colors.PrintSuccess("Vehicle %s shared with user %s by user %s", imei, targetUser.Email, user.Email)
+	log.Printf("Vehicle %s shared with user %s by user %s", imei, targetUser.Email, user.Email)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
@@ -1511,7 +1528,7 @@ func (vc *VehicleController) RevokeVehicleShare(c *gin.Context) {
 		return
 	}
 
-	colors.PrintSuccess("Vehicle access revoked: IMEI=%s, ShareID=%d, RevokedBy=%s", imei, shareId, user.Email)
+	log.Printf("Vehicle access revoked: IMEI=%s, ShareID=%d, RevokedBy=%s", imei, shareId, user.Email)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
