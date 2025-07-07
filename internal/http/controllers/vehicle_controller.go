@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"luna_iot_server/internal/db"
@@ -163,23 +164,37 @@ func parseInt(s string) int {
 
 // GetVehicle returns a single vehicle by IMEI
 func (vc *VehicleController) GetVehicle(c *gin.Context) {
-	imei := c.Param("imei")
+	imei := strings.TrimSpace(c.Param("imei"))
+	fmt.Printf("Received IMEI request: '%s' (length: %d)\n", imei, len(imei))
 
-	// Log the IMEI received
-	fmt.Println(colors.Yellow + "Received IMEI: " + colors.Green + imei + colors.Reset)
-
-	var vehicle models.Vehicle
-	if err := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle).Error; err != nil {
-		// Log the error if vehicle is not found
-		fmt.Println(colors.Red + "Error fetching vehicle: " + err.Error() + colors.Reset)
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Vehicle not found",
-		})
-		return
+	// Debug: List all vehicles to check if IMEI exists
+	var allVehicles []models.Vehicle
+	if err := db.GetDB().Select("imei").Find(&allVehicles).Error; err != nil {
+		fmt.Printf("Error listing vehicles: %v\n", err)
+	} else {
+		fmt.Println("Available vehicles:")
+		for _, v := range allVehicles {
+			fmt.Printf("- IMEI: '%s' (length: %d)\n", v.IMEI, len(v.IMEI))
+		}
 	}
 
-	// Log successful vehicle fetch
-	fmt.Println(colors.Green + "Successfully fetched vehicle: " + colors.Cyan + vehicle.IMEI + colors.Reset)
+	var vehicle models.Vehicle
+	result := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle)
+	if result.Error != nil {
+		fmt.Printf("Error fetching vehicle: %v (Records found: %d)\n", result.Error, result.RowsAffected)
+
+		// Try case-insensitive search as fallback
+		result = db.GetDB().Preload("Device").Where("LOWER(imei) = LOWER(?)", imei).First(&vehicle)
+		if result.Error != nil {
+			fmt.Printf("Error in case-insensitive search: %v\n", result.Error)
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Vehicle not found",
+			})
+			return
+		}
+	}
+
+	fmt.Printf("Successfully found vehicle with IMEI: '%s'\n", vehicle.IMEI)
 
 	// Load user access information with user details
 	var userAccess []models.UserVehicle
