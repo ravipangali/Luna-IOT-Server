@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -163,20 +164,22 @@ func parseInt(s string) int {
 // GetVehicle returns a single vehicle by IMEI
 func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	imei := c.Param("imei")
-	if len(imei) != 16 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid IMEI format",
-		})
-		return
-	}
+
+	// Log the IMEI received
+	fmt.Println(colors.Yellow("Received IMEI:"), colors.Green(imei))
 
 	var vehicle models.Vehicle
 	if err := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle).Error; err != nil {
+		// Log the error if vehicle is not found
+		fmt.Println(colors.Red("Error fetching vehicle:"), err.Error())
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Vehicle not found",
 		})
 		return
 	}
+
+	// Log successful vehicle fetch
+	fmt.Println(colors.Green("Successfully fetched vehicle:"), colors.Cyan(vehicle.IMEI))
 
 	// Load user access information with user details
 	var userAccess []models.UserVehicle
