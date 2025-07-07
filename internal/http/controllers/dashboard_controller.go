@@ -25,6 +25,7 @@ type DashboardStatsResponse struct {
 	TotalHitsToday    int64   `json:"total_hits_today"`
 	TotalKMToday      float64 `json:"total_km_today"`
 	TotalSMSAvailable int     `json:"total_sms_available"`
+	DeletedBackupData int64   `json:"deleted_backup_data"`
 }
 
 type smsBalance struct {
@@ -32,7 +33,7 @@ type smsBalance struct {
 }
 
 func (dc *DashboardController) GetDashboardStats(c *gin.Context) {
-	var totalUsers, totalVehicles, totalHitsToday int64
+	var totalUsers, totalVehicles, totalHitsToday, deletedBackupData int64
 	var totalKMToday float64
 	var totalSMSAvailable int
 
@@ -47,6 +48,18 @@ func (dc *DashboardController) GetDashboardStats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get total vehicles"})
 		return
 	}
+
+	// Count deleted backup data from all tables
+	var deletedUsers, deletedVehicles, deletedDevices, deletedDeviceModels, deletedUserVehicles, deletedGPSData int64
+
+	gormDB.Unscoped().Model(&models.User{}).Where("deleted_at IS NOT NULL").Count(&deletedUsers)
+	gormDB.Unscoped().Model(&models.Vehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedVehicles)
+	gormDB.Unscoped().Model(&models.Device{}).Where("deleted_at IS NOT NULL").Count(&deletedDevices)
+	gormDB.Unscoped().Model(&models.DeviceModel{}).Where("deleted_at IS NOT NULL").Count(&deletedDeviceModels)
+	gormDB.Unscoped().Model(&models.UserVehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedUserVehicles)
+	gormDB.Unscoped().Model(&models.GPSData{}).Where("deleted_at IS NOT NULL").Count(&deletedGPSData)
+
+	deletedBackupData = deletedUsers + deletedVehicles + deletedDevices + deletedDeviceModels + deletedUserVehicles + deletedGPSData
 
 	now := time.Now().UTC()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
@@ -92,7 +105,78 @@ func (dc *DashboardController) GetDashboardStats(c *gin.Context) {
 		TotalHitsToday:    totalHitsToday,
 		TotalKMToday:      totalKMToday,
 		TotalSMSAvailable: totalSMSAvailable,
+		DeletedBackupData: deletedBackupData,
 	}
 
 	c.JSON(http.StatusOK, stats)
+}
+
+// ForceDeleteAllBackupData permanently deletes all soft-deleted records from all tables
+func (dc *DashboardController) ForceDeleteAllBackupData(c *gin.Context) {
+	gormDB := db.GetDB()
+
+	// Count records to be deleted for confirmation
+	var totalToDelete int64
+	var deletedUsers, deletedVehicles, deletedDevices, deletedDeviceModels, deletedUserVehicles, deletedGPSData int64
+
+	gormDB.Unscoped().Model(&models.User{}).Where("deleted_at IS NOT NULL").Count(&deletedUsers)
+	gormDB.Unscoped().Model(&models.Vehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedVehicles)
+	gormDB.Unscoped().Model(&models.Device{}).Where("deleted_at IS NOT NULL").Count(&deletedDevices)
+	gormDB.Unscoped().Model(&models.DeviceModel{}).Where("deleted_at IS NOT NULL").Count(&deletedDeviceModels)
+	gormDB.Unscoped().Model(&models.UserVehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedUserVehicles)
+	gormDB.Unscoped().Model(&models.GPSData{}).Where("deleted_at IS NOT NULL").Count(&deletedGPSData)
+
+	totalToDelete = deletedUsers + deletedVehicles + deletedDevices + deletedDeviceModels + deletedUserVehicles + deletedGPSData
+
+	if totalToDelete == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success":       true,
+			"message":       "No deleted backup data found to force delete",
+			"deleted_count": 0,
+		})
+		return
+	}
+
+	// Perform the permanent deletion
+	result := gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.User{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete users"})
+		return
+	}
+
+	result = gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.Vehicle{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete vehicles"})
+		return
+	}
+
+	result = gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.Device{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete devices"})
+		return
+	}
+
+	result = gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.DeviceModel{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete device models"})
+		return
+	}
+
+	result = gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.UserVehicle{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete user vehicles"})
+		return
+	}
+
+	result = gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.GPSData{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete GPS data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"message":       "All deleted backup data has been permanently removed",
+		"deleted_count": totalToDelete,
+	})
 }

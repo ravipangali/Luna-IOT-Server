@@ -422,3 +422,37 @@ func (uc *UserController) DeleteUserImage(c *gin.Context) {
 		"message": "User image deleted successfully",
 	})
 }
+
+// ForceDeleteUsersBackupData permanently deletes all soft-deleted users
+func (uc *UserController) ForceDeleteUsersBackupData(c *gin.Context) {
+	gormDB := db.GetDB()
+
+	// Count records to be deleted for confirmation
+	var deletedUsers int64
+	gormDB.Unscoped().Model(&models.User{}).Where("deleted_at IS NOT NULL").Count(&deletedUsers)
+
+	if deletedUsers == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success":       true,
+			"message":       "No deleted user backup data found to force delete",
+			"deleted_count": 0,
+		})
+		return
+	}
+
+	// Perform the permanent deletion
+	result := gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.User{})
+	if result.Error != nil {
+		colors.PrintError("Failed to force delete users: %v", result.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete user backup data"})
+		return
+	}
+
+	colors.PrintSuccess("Force deleted %d users permanently", deletedUsers)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"message":       "User backup data has been permanently removed",
+		"deleted_count": deletedUsers,
+	})
+}
