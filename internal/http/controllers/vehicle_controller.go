@@ -166,6 +166,7 @@ func parseInt(s string) int {
 func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	imei := strings.TrimSpace(c.Param("imei"))
 	fmt.Printf("Received IMEI request: '%s' (length: %d)\n", imei, len(imei))
+	fmt.Printf("Received IMEI request (bytes): %v\n", []byte(imei))
 
 	// Debug: List all vehicles to check if IMEI exists
 	var allVehicles []models.Vehicle
@@ -173,24 +174,40 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 		fmt.Printf("Error listing vehicles: %v\n", err)
 	} else {
 		fmt.Println("Available vehicles:")
+		foundInList := false
 		for _, v := range allVehicles {
-			fmt.Printf("- IMEI: '%s' (length: %d)\n", v.IMEI, len(v.IMEI))
+			fmt.Printf("- IMEI from DB: '%s' (length: %d)\n", v.IMEI, len(v.IMEI))
+			fmt.Printf("- IMEI from DB (bytes): %v\n", []byte(v.IMEI))
+			if v.IMEI == imei {
+				fmt.Println("  ^-- Direct string match is successful in Go.")
+				foundInList = true
+			}
+		}
+		if !foundInList {
+			fmt.Println("!!! WARNING: The requested IMEI was not found in the list of all vehicle IMEIs during Go-side check.")
 		}
 	}
 
 	var vehicle models.Vehicle
-	result := db.GetDB().Where("imei = ?", imei).First(&vehicle)
+	// Use a more specific query to avoid any GORM magic issues.
+	result := db.GetDB().Table("vehicles").Where("imei = ?", imei).First(&vehicle)
 	if result.Error != nil {
-		fmt.Printf("Error fetching vehicle: %v (Records found: %d)\n", result.Error, result.RowsAffected)
+		fmt.Printf("Error fetching vehicle with 'imei = ?': %v (Records found: %d)\n", result.Error, result.RowsAffected)
 
-		// Try case-insensitive search as fallback
-		result = db.GetDB().Where("LOWER(imei) = LOWER(?)", imei).First(&vehicle)
+		// Try with LIKE as well for debugging
+		result = db.GetDB().Where("imei LIKE ?", imei).First(&vehicle)
 		if result.Error != nil {
-			fmt.Printf("Error in case-insensitive search: %v\n", result.Error)
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "Vehicle not found",
-			})
-			return
+			fmt.Printf("Error fetching vehicle with 'imei LIKE ?': %v (Records found: %d)\n", result.Error, result.RowsAffected)
+
+			// Try case-insensitive search as fallback
+			result = db.GetDB().Where("LOWER(imei) = LOWER(?)", imei).First(&vehicle)
+			if result.Error != nil {
+				fmt.Printf("Error in case-insensitive search: %v\n", result.Error)
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": "Vehicle not found",
+				})
+				return
+			}
 		}
 	}
 
@@ -200,12 +217,16 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	var device models.Device
 	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
 		vehicle.Device = device
+	} else {
+		fmt.Printf("Could not load device for IMEI %s: %v\n", vehicle.IMEI, err)
 	}
 
 	// Load user access information with user details
 	var userAccess []models.UserVehicle
 	if err := db.GetDB().Preload("User").Where("vehicle_id = ? AND is_active = ?", vehicle.IMEI, true).Find(&userAccess).Error; err == nil {
 		vehicle.UserAccess = userAccess
+	} else {
+		fmt.Printf("Could not load user access for IMEI %s: %v\n", vehicle.IMEI, err)
 	}
 
 	// Organize users by their roles
