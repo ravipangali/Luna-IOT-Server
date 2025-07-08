@@ -259,7 +259,7 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 
 	response := gin.H{
 		"data":    vehicle,
-		"message": "Vehicle retrieved successfully",
+		"message": "Vehicle details retrieved successfully",
 		"users": gin.H{
 			"main_users":   mainUsers,
 			"shared_users": sharedUsers,
@@ -284,7 +284,7 @@ func (vc *VehicleController) GetVehicleByRegNo(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":    vehicle,
-		"message": "Vehicle retrieved successfully",
+		"message": "Vehicle details retrieved successfully",
 	})
 }
 
@@ -486,7 +486,7 @@ func (vc *VehicleController) CreateVehicle(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"data":    vehicle,
-		"message": "Vehicle created successfully with main user assigned",
+		"message": "Vehicle details retrieved successfully",
 		"main_user": gin.H{
 			"id":    mainUser.ID,
 			"name":  mainUser.Name,
@@ -798,7 +798,7 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":    vehicle,
-		"message": "Vehicle retrieved successfully",
+		"message": "Vehicle details retrieved successfully",
 	})
 }
 
