@@ -573,7 +573,7 @@ func (gc *GPSController) GetIndividualTrackingData(c *gin.Context) {
 		Preload("Device").
 		Preload("Vehicle").
 		Order("timestamp DESC").
-		Limit(100). // Check last 100 records
+		Limit(500). // Check last 500 records
 		Find(&allGPSData).Error; err == nil {
 
 		// Search for valid coordinates in historical data
