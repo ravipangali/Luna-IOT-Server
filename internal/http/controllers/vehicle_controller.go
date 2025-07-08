@@ -179,12 +179,12 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	}
 
 	var vehicle models.Vehicle
-	result := db.GetDB().Preload("Device").Where("imei = ?", imei).First(&vehicle)
+	result := db.GetDB().Where("imei = ?", imei).First(&vehicle)
 	if result.Error != nil {
 		fmt.Printf("Error fetching vehicle: %v (Records found: %d)\n", result.Error, result.RowsAffected)
 
 		// Try case-insensitive search as fallback
-		result = db.GetDB().Preload("Device").Where("LOWER(imei) = LOWER(?)", imei).First(&vehicle)
+		result = db.GetDB().Where("LOWER(imei) = LOWER(?)", imei).First(&vehicle)
 		if result.Error != nil {
 			fmt.Printf("Error in case-insensitive search: %v\n", result.Error)
 			c.JSON(http.StatusNotFound, gin.H{
@@ -195,6 +195,12 @@ func (vc *VehicleController) GetVehicle(c *gin.Context) {
 	}
 
 	fmt.Printf("Successfully found vehicle with IMEI: '%s'\n", vehicle.IMEI)
+
+	// Manually load device information since GORM relation is not direct
+	var device models.Device
+	if err := db.GetDB().Where("imei = ?", vehicle.IMEI).First(&device).Error; err == nil {
+		vehicle.Device = device
+	}
 
 	// Load user access information with user details
 	var userAccess []models.UserVehicle
