@@ -776,12 +776,21 @@ func (vc *VehicleController) GetMyVehicle(c *gin.Context) {
 	imei := c.Param("imei")
 
 	var vehicle models.Vehicle
-	// Find the vehicle and ensure the user has access to it
-	err := db.GetDB().
-		Joins("JOIN user_vehicles ON user_vehicles.vehicle_id = vehicles.imei").
-		Where("user_vehicles.user_id = ? AND user_vehicles.vehicle_id = ? AND user_vehicles.is_active = ?", currentUser.ID, imei, true).
-		Preload("UserAccess.User").
-		First(&vehicle).Error
+	var err error
+
+	// If the user is an admin, they can access any vehicle.
+	if currentUser.Role == models.UserRoleAdmin {
+		err = db.GetDB().
+			Preload("UserAccess.User").
+			First(&vehicle, "imei = ?", imei).Error
+	} else {
+		// For non-admin users, find the vehicle and ensure the user has access to it.
+		err = db.GetDB().
+			Joins("JOIN user_vehicles ON user_vehicles.vehicle_id = vehicles.imei").
+			Where("user_vehicles.user_id = ? AND user_vehicles.vehicle_id = ? AND user_vehicles.is_active = ?", currentUser.ID, imei, true).
+			Preload("UserAccess.User").
+			First(&vehicle).Error
+	}
 
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
