@@ -25,6 +25,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	gpsController := controllers.NewGPSController()
 	userTrackingController := controllers.NewUserTrackingController()
 	dashboardController := controllers.NewDashboardController()
+	rechargeController := controllers.NewRechargeController()
 
 	// Use shared control controller if provided, otherwise create new one
 	var controlController *controllers.ControlController
@@ -86,6 +87,13 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		{
 			settings.GET("", settingController.GetSettings)
 			settings.PUT("", middleware.AdminOnlyMiddleware(), settingController.UpdateSettings)
+		}
+
+		// Recharge route
+		recharge := v1.Group("/recharge")
+		recharge.Use(middleware.AuthMiddleware())
+		{
+			recharge.POST("", rechargeController.RechargePhone)
 		}
 
 		// Device routes (authenticated users only)

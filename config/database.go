@@ -33,11 +33,3 @@ func (c *DatabaseConfig) GetDSN() string {
 	return fmt.Sprintf("host=%s port=%s user=%s role=%s password=%s dbname=%s sslmode=%s",
 		c.Host, c.Port, c.User, c.Role, c.Password, c.DBName, c.SSLMode)
 }
-
-// getEnv gets environment variable with fallback
-// func getEnv(key, fallback string) string {
-// 	if value := os.Getenv(key); value != "" {
-// 		return value
-// 	}
-// 	return fallback
-// }
