@@ -19,6 +19,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	userController := controllers.NewUserController()
 	deviceController := controllers.NewDeviceController()
 	deviceModelController := controllers.NewDeviceModelController()
+	settingController := controllers.NewSettingController()
 	vehicleController := controllers.NewVehicleController()
 	userVehicleController := controllers.NewUserVehicleController()
 	gpsController := controllers.NewGPSController()
@@ -77,6 +78,14 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 
 			// Force delete backup data route (admin only)
 			users.DELETE("/force-delete-backup", middleware.AdminOnlyMiddleware(), userController.ForceDeleteUsersBackupData)
+		}
+
+		// Settings routes
+		settings := v1.Group("/settings")
+		settings.Use(middleware.AuthMiddleware())
+		{
+			settings.GET("", settingController.GetSettings)
+			settings.PUT("", middleware.AdminOnlyMiddleware(), settingController.UpdateSettings)
 		}
 
 		// Device routes (authenticated users only)

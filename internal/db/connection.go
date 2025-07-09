@@ -35,6 +35,8 @@ func Initialize() error {
 		return fmt.Errorf("failed to run migrations: %v", err)
 	}
 
+	models.EnsureSettingExists(DB)
+
 	return nil
 }
 
@@ -60,6 +62,7 @@ func RunMigrations() error {
 		&models.Vehicle{},
 		&models.GPSData{},
 		&models.UserVehicle{},
+		&models.Setting{},
 	)
 	if err != nil {
 		return fmt.Errorf("auto-migration failed: %v", err)
