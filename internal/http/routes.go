@@ -294,6 +294,17 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			popups.GET("/:id", popupController.GetPopup)
 			popups.PUT("/:id", popupController.UpdatePopup)
 			popups.DELETE("/:id", popupController.DeletePopup)
+
+			// Popup image routes
+			popups.GET("/:id/image", popupController.GetPopupImage)
+			popups.DELETE("/:id/image", popupController.DeletePopupImage)
+		}
+
+		// Active popups route (for regular users - no admin required)
+		activePopups := v1.Group("/active-popups")
+		activePopups.Use(middleware.AuthMiddleware())
+		{
+			activePopups.GET("", popupController.GetActivePopups)
 		}
 
 		// Dashboard routes

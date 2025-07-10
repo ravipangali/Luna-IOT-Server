@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
@@ -97,6 +98,27 @@ func (pc *PopupController) CreatePopup(c *gin.Context) {
 		return
 	}
 
+	// Image validation
+	if popup.Image != "" {
+		if !strings.HasPrefix(popup.Image, "data:image/") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "Invalid image format",
+				"message": "Image must be a valid base64 data URL",
+			})
+			return
+		}
+		if len(popup.Image) > 7*1024*1024 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "Image too large",
+				"message": "Image size must be less than 5MB",
+			})
+			return
+		}
+		colors.PrintInfo("Popup image included in request (size: %d bytes)", len(popup.Image))
+	}
+
 	if err := db.GetDB().Create(&popup).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -134,6 +156,27 @@ func (pc *PopupController) UpdatePopup(c *gin.Context) {
 		return
 	}
 
+	// Image validation
+	if updateData.Image != "" && updateData.Image != existingPopup.Image {
+		if !strings.HasPrefix(updateData.Image, "data:image/") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "Invalid image format",
+				"message": "Image must be a valid base64 data URL",
+			})
+			return
+		}
+		if len(updateData.Image) > 7*1024*1024 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "Image too large",
+				"message": "Image size must be less than 5MB",
+			})
+			return
+		}
+		colors.PrintInfo("Popup image updated (size: %d bytes)", len(updateData.Image))
+	}
+
 	// Use map to update to allow setting boolean to false
 	updatePayload := map[string]interface{}{
 		"title":     updateData.Title,
@@ -163,4 +206,104 @@ func (pc *PopupController) DeletePopup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Popup deleted successfully", "success": true})
+}
+
+// GetPopupImage returns a popup's image
+func (pc *PopupController) GetPopupImage(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid popup ID",
+			"message": "Popup ID must be a valid number",
+		})
+		return
+	}
+
+	var popup models.Popup
+	if err := db.GetDB().Select("id, image").First(&popup, uint(id)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Popup not found",
+			"message": "No popup found with the specified ID",
+		})
+		return
+	}
+
+	if popup.Image == "" {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Popup has no image",
+			"message": "This popup does not have an image",
+		})
+		return
+	}
+
+	// Return the base64 image data
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"image":   popup.Image,
+	})
+}
+
+// DeletePopupImage removes a popup's image
+func (pc *PopupController) DeletePopupImage(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid popup ID",
+			"message": "Popup ID must be a valid number",
+		})
+		return
+	}
+
+	var popup models.Popup
+	if err := db.GetDB().First(&popup, uint(id)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Popup not found",
+			"message": "No popup found with the specified ID",
+		})
+		return
+	}
+
+	// Clear the image field
+	if err := db.GetDB().Model(&popup).Update("image", "").Error; err != nil {
+		colors.PrintError("Failed to delete popup image: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to delete popup image",
+			"message": "Database error occurred while deleting popup image",
+		})
+		return
+	}
+
+	colors.PrintSuccess("Popup image deleted successfully for popup ID: %d", popup.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Popup image deleted successfully",
+	})
+}
+
+// GetActivePopups returns only active popups for regular users (no admin required)
+func (pc *PopupController) GetActivePopups(c *gin.Context) {
+	var popups []models.Popup
+
+	if err := db.GetDB().Where("is_active = ?", true).Find(&popups).Error; err != nil {
+		colors.PrintError("Failed to fetch active popups: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch active popups",
+			"message": "Unable to retrieve active popups from database",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    popups,
+		"count":   len(popups),
+		"message": "Active popups retrieved successfully",
+	})
 }
