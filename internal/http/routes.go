@@ -26,6 +26,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	userTrackingController := controllers.NewUserTrackingController()
 	dashboardController := controllers.NewDashboardController()
 	rechargeController := controllers.NewRechargeController()
+	popupController := controllers.NewPopupController()
 
 	// Use shared control controller if provided, otherwise create new one
 	var controlController *controllers.ControlController
@@ -282,6 +283,17 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			// View routes (users can view their own access, admins can view all)
 			userVehicles.GET("/user/:user_id", userVehicleController.GetUserVehicleAccess)       // Will be restricted by middleware
 			userVehicles.GET("/vehicle/:vehicle_id", userVehicleController.GetVehicleUserAccess) // Will be restricted by middleware
+		}
+
+		// Popup routes (admin only)
+		popups := v1.Group("/popups")
+		popups.Use(middleware.AuthMiddleware(), middleware.AdminOnlyMiddleware())
+		{
+			popups.GET("", popupController.GetPopups)
+			popups.POST("", popupController.CreatePopup)
+			popups.GET("/:id", popupController.GetPopup)
+			popups.PUT("/:id", popupController.UpdatePopup)
+			popups.DELETE("/:id", popupController.DeletePopup)
 		}
 
 		// Dashboard routes

@@ -63,6 +63,7 @@ func RunMigrations() error {
 		&models.GPSData{},
 		&models.UserVehicle{},
 		&models.Setting{},
+		&models.Popup{},
 	)
 	if err != nil {
 		return fmt.Errorf("auto-migration failed: %v", err)
