@@ -139,6 +139,13 @@ func (ac *AuthController) Login(c *gin.Context) {
 		colors.PrintInfo("Generated new token for user %s (old token invalidated)", req.Phone)
 	}
 
+	// Send logout notification to other devices of this user
+	// Note: We'll handle this through a callback mechanism to avoid circular imports
+	colors.PrintInfo("User %s logged in - old tokens invalidated", req.Phone)
+
+	// TODO: Implement logout notification through a proper callback mechanism
+	// This will be handled by the WebSocket service when it's initialized
+
 	// Save token to database by updating only token fields
 	// This prevents the BeforeUpdate hook from re-hashing the password
 	if err := db.GetDB().Model(&user).Updates(map[string]interface{}{
