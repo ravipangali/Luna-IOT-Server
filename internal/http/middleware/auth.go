@@ -76,11 +76,11 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// Check if token is valid (not expired)
 		if !user.IsTokenValid() {
-			colors.PrintWarning("Authentication failed: Token expired for user %s", user.Email)
+			colors.PrintWarning("Authentication failed: Invalid token for user %s", user.Email)
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"error":   "Unauthorized",
-				"message": "Token has expired",
+				"message": "Invalid token",
 			})
 			c.Abort()
 			return
@@ -131,7 +131,7 @@ func OptionalAuthMiddleware() gin.HandlerFunc {
 
 		// Check if token is valid (not expired)
 		if !user.IsTokenValid() {
-			// Expired token, continue without authentication
+			// Invalid token, continue without authentication
 			c.Next()
 			return
 		}

@@ -134,6 +134,11 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
+	// Log the token change for debugging
+	if user.Token != "" {
+		colors.PrintInfo("Generated new token for user %s (old token invalidated)", req.Phone)
+	}
+
 	// Save token to database by updating only token fields
 	// This prevents the BeforeUpdate hook from re-hashing the password
 	if err := db.GetDB().Model(&user).Updates(map[string]interface{}{
@@ -258,6 +263,8 @@ func (ac *AuthController) Register(c *gin.Context) {
 		})
 		return
 	}
+
+	colors.PrintInfo("Generated initial token for new user %s", req.Email)
 
 	// Save user to database
 	if err := db.GetDB().Create(&user).Error; err != nil {

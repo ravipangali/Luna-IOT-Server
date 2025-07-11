@@ -54,6 +54,12 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
+	// Update token system to remove expiration
+	if err := updateTokenSystem(db); err != nil {
+		colors.PrintError("Failed to update token system: %v", err)
+		return err
+	}
+
 	colors.PrintSuccess("Database migrations completed successfully")
 	return nil
 }
@@ -379,5 +385,29 @@ func fixUserVehicleConstraints(db *gorm.DB) error {
 	}
 
 	colors.PrintSuccess("✓ user_vehicles foreign key constraints fixed")
+	return nil
+}
+
+// updateTokenSystem updates the token system to remove expiration
+func updateTokenSystem(db *gorm.DB) error {
+	colors.PrintInfo("Updating token system to remove expiration...")
+
+	// Clear all existing token expiration times since tokens no longer expire
+	colors.PrintInfo("Clearing all token expiration times...")
+	if err := db.Exec("UPDATE users SET token_exp = NULL WHERE token_exp IS NOT NULL").Error; err != nil {
+		colors.PrintWarning("Could not clear token expiration times: %v", err)
+	} else {
+		colors.PrintSuccess("Cleared all token expiration times")
+	}
+
+	// Add a comment to the token_exp column to indicate it's no longer used
+	colors.PrintInfo("Adding comment to token_exp column...")
+	if err := db.Exec("COMMENT ON COLUMN users.token_exp IS 'No longer used - tokens do not expire'").Error; err != nil {
+		colors.PrintWarning("Could not add comment to token_exp column: %v", err)
+	} else {
+		colors.PrintSuccess("Added comment to token_exp column")
+	}
+
+	colors.PrintSuccess("Token system updated successfully")
 	return nil
 }

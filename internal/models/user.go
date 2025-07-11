@@ -89,6 +89,7 @@ func (u *User) CheckPassword(password string) bool {
 }
 
 // GenerateToken creates a new authentication token for the user
+// This will invalidate any existing token for this user
 func (u *User) GenerateToken() error {
 	// Generate a random 32-byte token
 	tokenBytes := make([]byte, 32)
@@ -97,19 +98,16 @@ func (u *User) GenerateToken() error {
 	}
 
 	u.Token = hex.EncodeToString(tokenBytes)
-	// Set token expiration to 24 hours from now
-	expirationTime := time.Now().Add(24 * time.Hour)
-	u.TokenExp = &expirationTime
+	// Remove expiration - token never expires automatically
+	u.TokenExp = nil
 
 	return nil
 }
 
 // IsTokenValid checks if the user's token is still valid
+// Since we removed expiration, only check if token exists
 func (u *User) IsTokenValid() bool {
-	if u.Token == "" || u.TokenExp == nil {
-		return false
-	}
-	return time.Now().Before(*u.TokenExp)
+	return u.Token != ""
 }
 
 // ClearToken removes the authentication token
