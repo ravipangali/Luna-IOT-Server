@@ -25,7 +25,6 @@ type DashboardStatsResponse struct {
 	TotalHitsToday    int64   `json:"total_hits_today"`
 	TotalKMToday      float64 `json:"total_km_today"`
 	TotalSMSAvailable int     `json:"total_sms_available"`
-	DeletedBackupData int64   `json:"deleted_backup_data"`
 }
 
 type smsBalance struct {
@@ -33,7 +32,7 @@ type smsBalance struct {
 }
 
 func (dc *DashboardController) GetDashboardStats(c *gin.Context) {
-	var totalUsers, totalVehicles, totalHitsToday, deletedBackupData int64
+	var totalUsers, totalVehicles, totalHitsToday int64
 	var totalKMToday float64
 	var totalSMSAvailable int
 
@@ -48,18 +47,6 @@ func (dc *DashboardController) GetDashboardStats(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get total vehicles"})
 		return
 	}
-
-	// Count deleted backup data from all tables
-	var deletedUsers, deletedVehicles, deletedDevices, deletedDeviceModels, deletedUserVehicles, deletedGPSData int64
-
-	gormDB.Unscoped().Model(&models.User{}).Where("deleted_at IS NOT NULL").Count(&deletedUsers)
-	gormDB.Unscoped().Model(&models.Vehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedVehicles)
-	gormDB.Unscoped().Model(&models.Device{}).Where("deleted_at IS NOT NULL").Count(&deletedDevices)
-	gormDB.Unscoped().Model(&models.DeviceModel{}).Where("deleted_at IS NOT NULL").Count(&deletedDeviceModels)
-	gormDB.Unscoped().Model(&models.UserVehicle{}).Where("deleted_at IS NOT NULL").Count(&deletedUserVehicles)
-	gormDB.Unscoped().Model(&models.GPSData{}).Where("deleted_at IS NOT NULL").Count(&deletedGPSData)
-
-	deletedBackupData = deletedUsers + deletedVehicles + deletedDevices + deletedDeviceModels + deletedUserVehicles + deletedGPSData
 
 	now := time.Now().UTC()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
@@ -105,7 +92,6 @@ func (dc *DashboardController) GetDashboardStats(c *gin.Context) {
 		TotalHitsToday:    totalHitsToday,
 		TotalKMToday:      totalKMToday,
 		TotalSMSAvailable: totalSMSAvailable,
-		DeletedBackupData: deletedBackupData,
 	}
 
 	c.JSON(http.StatusOK, stats)
