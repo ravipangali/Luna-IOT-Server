@@ -290,7 +290,7 @@ func (dmc *DeviceModelController) DeleteDeviceModel(c *gin.Context) {
 		return
 	}
 
-	if err := db.GetDB().Delete(&deviceModel).Error; err != nil {
+	if err := db.GetDB().Unscoped().Delete(&deviceModel).Error; err != nil {
 		colors.PrintError("❌ Failed to delete device model: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -304,39 +304,5 @@ func (dmc *DeviceModelController) DeleteDeviceModel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Device model deleted successfully",
-	})
-}
-
-// ForceDeleteDeviceModelsBackupData permanently deletes all soft-deleted device models
-func (dmc *DeviceModelController) ForceDeleteDeviceModelsBackupData(c *gin.Context) {
-	gormDB := db.GetDB()
-
-	// Count records to be deleted for confirmation
-	var deletedDeviceModels int64
-	gormDB.Unscoped().Model(&models.DeviceModel{}).Where("deleted_at IS NOT NULL").Count(&deletedDeviceModels)
-
-	if deletedDeviceModels == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"success":       true,
-			"message":       "No deleted device model backup data found to force delete",
-			"deleted_count": 0,
-		})
-		return
-	}
-
-	// Perform the permanent deletion
-	result := gormDB.Unscoped().Where("deleted_at IS NOT NULL").Delete(&models.DeviceModel{})
-	if result.Error != nil {
-		colors.PrintError("Failed to force delete device models: %v", result.Error)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to force delete device model backup data"})
-		return
-	}
-
-	colors.PrintSuccess("Force deleted %d device models permanently", deletedDeviceModels)
-
-	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"message":       "Device model backup data has been permanently removed",
-		"deleted_count": deletedDeviceModels,
 	})
 }

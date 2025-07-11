@@ -200,7 +200,7 @@ func (pc *PopupController) DeletePopup(c *gin.Context) {
 		return
 	}
 
-	if err := db.GetDB().Delete(&models.Popup{}, uint(id)).Error; err != nil {
+	if err := db.GetDB().Unscoped().Delete(&models.Popup{}, uint(id)).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete popup"})
 		return
 	}

@@ -309,7 +309,7 @@ func (uvc *UserVehicleController) RevokeVehicleAccess(c *gin.Context) {
 		return
 	}
 
-	if err := db.GetDB().Delete(&userVehicle).Error; err != nil {
+	if err := db.GetDB().Unscoped().Delete(&userVehicle).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to revoke access",

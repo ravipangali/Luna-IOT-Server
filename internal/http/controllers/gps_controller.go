@@ -361,7 +361,7 @@ func (gc *GPSController) DeleteGPSData(c *gin.Context) {
 		return
 	}
 
-	if err := db.GetDB().Delete(&gpsData).Error; err != nil {
+	if err := db.GetDB().Unscoped().Delete(&gpsData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to delete GPS data",
 		})

@@ -78,8 +78,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			users.GET("/:id/image", userController.GetUserImage)
 			users.DELETE("/:id/image", userController.DeleteUserImage)
 
-			// Force delete backup data route (admin only)
-			users.DELETE("/force-delete-backup", middleware.AdminOnlyMiddleware(), userController.ForceDeleteUsersBackupData)
 		}
 
 		// Settings routes
@@ -108,8 +106,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			devices.PUT("/:id", middleware.AdminOnlyMiddleware(), deviceController.UpdateDevice)    // Admin only
 			devices.DELETE("/:id", middleware.AdminOnlyMiddleware(), deviceController.DeleteDevice) // Admin only
 
-			// Force delete backup data route (admin only)
-			devices.DELETE("/force-delete-backup", middleware.AdminOnlyMiddleware(), deviceController.ForceDeleteDevicesBackupData)
 		}
 
 		// Device Model routes (authenticated users only)
@@ -122,8 +118,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			deviceModels.PUT("/:id", middleware.AdminOnlyMiddleware(), deviceModelController.UpdateDeviceModel)    // Admin only
 			deviceModels.DELETE("/:id", middleware.AdminOnlyMiddleware(), deviceModelController.DeleteDeviceModel) // Admin only
 
-			// Force delete backup data route (admin only)
-			deviceModels.DELETE("/force-delete-backup", middleware.AdminOnlyMiddleware(), deviceModelController.ForceDeleteDeviceModelsBackupData)
 		}
 
 		// Vehicle routes (authenticated users only)
@@ -138,8 +132,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			vehicles.PUT("/:imei", middleware.AdminOnlyMiddleware(), vehicleController.UpdateVehicle)    // Admin only
 			vehicles.DELETE("/:imei", middleware.AdminOnlyMiddleware(), vehicleController.DeleteVehicle) // Admin only
 
-			// Force delete backup data route (admin only)
-			vehicles.DELETE("/force-delete-backup", middleware.AdminOnlyMiddleware(), vehicleController.ForceDeleteVehiclesBackupData)
 		}
 
 		// Customer vehicle routes (authenticated users can manage their own vehicles)
@@ -313,8 +305,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		{
 			dashboard.GET("/stats", dashboardController.GetDashboardStats)
 
-			// Force delete all backup data route (admin only)
-			dashboard.DELETE("/force-delete-all-backup", dashboardController.ForceDeleteAllBackupData)
 		}
 	}
 
