@@ -562,9 +562,36 @@ func (vc *VehicleController) DeleteVehicle(c *gin.Context) {
 		return
 	}
 
-	if err := db.GetDB().Unscoped().Delete(&vehicle).Error; err != nil {
+	// Start transaction to delete vehicle and all related user access
+	tx := db.GetDB().Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Delete all user-vehicle relationships first
+	if err := tx.Unscoped().Where("vehicle_id = ?", imei).Delete(&models.UserVehicle{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to delete vehicle access records",
+		})
+		return
+	}
+
+	// Delete the vehicle
+	if err := tx.Unscoped().Delete(&vehicle).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to delete vehicle",
+		})
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to complete vehicle deletion",
 		})
 		return
 	}

@@ -339,9 +339,45 @@ func (uc *UserController) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	if err := db.GetDB().Unscoped().Delete(&user).Error; err != nil {
+	// Start transaction to delete user and all related vehicle access
+	tx := db.GetDB().Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Delete all user-vehicle relationships first
+	if err := tx.Unscoped().Where("user_id = ?", user.ID).Delete(&models.UserVehicle{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to delete user vehicle access records",
+		})
+		return
+	}
+
+	// Delete all user-vehicle relationships where this user is the granted_by
+	if err := tx.Unscoped().Where("granted_by = ?", user.ID).Delete(&models.UserVehicle{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to delete user granted access records",
+		})
+		return
+	}
+
+	// Delete the user
+	if err := tx.Unscoped().Delete(&user).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to delete user",
+		})
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to complete user deletion",
 		})
 		return
 	}
