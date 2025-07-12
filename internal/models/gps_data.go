@@ -13,9 +13,9 @@ type GPSData struct {
 	IMEI      string    `json:"imei" gorm:"size:16;not null;index" validate:"required,len=16"`
 	Timestamp time.Time `json:"timestamp" gorm:"not null;index"`
 
-	// GPS Location Data - Enhanced precision for accurate tracking
-	Latitude  *float64 `json:"latitude" gorm:"type:decimal(15,12)"`
-	Longitude *float64 `json:"longitude" gorm:"type:decimal(15,12)"`
+	// GPS Location Data
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
 	Speed     *int     `json:"speed"`    // km/h
 	Course    *int     `json:"course"`   // degrees (0-360)
 	Altitude  *int     `json:"altitude"` // meters
@@ -77,11 +77,8 @@ func (g *GPSData) BeforeCreate(tx *gorm.DB) error {
 
 // IsValidLocation checks if GPS coordinates are valid
 func (g *GPSData) IsValidLocation() bool {
-	// Latitude: Only positive values (0-90)
-	// Longitude: Both negative and positive values (-180 to +180)
-	return g.Latitude != nil && g.Longitude != nil &&
-		*g.Latitude > 0 && *g.Latitude <= 90 &&
-		*g.Longitude >= -180 && *g.Longitude <= 180
+	// Only check if coordinates are not null
+	return g.Latitude != nil && g.Longitude != nil
 }
 
 // GetLocationString returns a formatted location string

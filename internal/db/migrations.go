@@ -18,11 +18,18 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
-	// Manually update the image column to TEXT type
-	if err := updateImageColumnToText(db); err != nil {
-		colors.PrintError("Failed to update image column: %v", err)
-		return err
+	// Update the image column in the users table to TEXT type
+	if err := updateImageColumnToText(DB); err != nil {
+		return fmt.Errorf("failed to update image column: %v", err)
 	}
+	colors.PrintSuccess("✓ User image column updated")
+
+	// The ensureUserVehicleColumns function now uses AutoMigrate, so this serves as a redundant check.
+	// This is safe to keep.
+	if err := ensureUserVehicleColumns(DB); err != nil {
+		return fmt.Errorf("failed to ensure user_vehicles table structure: %v", err)
+	}
+	colors.PrintSuccess("✓ User-Vehicle permissions table structure verified")
 
 	// Add token columns to users table if they don't exist
 	if err := addTokenColumnsToUsers(db); err != nil {
@@ -33,12 +40,6 @@ func MigrateDB(db *gorm.DB) error {
 	// Fix the foreign key constraint between vehicles and devices
 	if err := fixVehicleDeviceConstraint(db); err != nil {
 		colors.PrintError("Failed to fix vehicle-device constraint: %v", err)
-		return err
-	}
-
-	// Update latitude and longitude precision
-	if err := updateLatLongPrecision(db); err != nil {
-		colors.PrintError("Failed to update latitude and longitude precision: %v", err)
 		return err
 	}
 
@@ -239,50 +240,6 @@ func fixVehicleDeviceConstraint(db *gorm.DB) error {
 	colors.PrintSuccess("✓ All foreign key constraints removed from devices and vehicles tables")
 	colors.PrintSuccess("✓ Devices table is now independent and can be created without constraints")
 	colors.PrintInfo("✓ Vehicles will reference devices via IMEI, but devices are independent")
-	return nil
-}
-
-// updateLatLongPrecision updates latitude and longitude columns to use higher precision
-func updateLatLongPrecision(db *gorm.DB) error {
-	colors.PrintInfo("Updating latitude and longitude precision to 15,12 for enhanced GPS accuracy...")
-
-	// Check current data types
-	var latDataType string
-	var lngDataType string
-
-	db.Raw(`
-		SELECT data_type || '(' || 
-		       COALESCE(numeric_precision::text, '') || ',' || 
-		       COALESCE(numeric_scale::text, '') || ')' as data_type
-		FROM information_schema.columns 
-		WHERE table_name = 'gps_data' AND column_name = 'latitude'
-	`).Scan(&latDataType)
-
-	db.Raw(`
-		SELECT data_type || '(' || 
-		       COALESCE(numeric_precision::text, '') || ',' || 
-		       COALESCE(numeric_scale::text, '') || ')' as data_type
-		FROM information_schema.columns 
-		WHERE table_name = 'gps_data' AND column_name = 'longitude'
-	`).Scan(&lngDataType)
-
-	colors.PrintInfo("Current latitude type: %s", latDataType)
-	colors.PrintInfo("Current longitude type: %s", lngDataType)
-
-	// Update latitude column
-	if err := db.Exec("ALTER TABLE gps_data ALTER COLUMN latitude TYPE NUMERIC(15,12)").Error; err != nil {
-		colors.PrintWarning("Failed to update latitude precision: %v", err)
-	} else {
-		colors.PrintSuccess("✓ Updated latitude column to NUMERIC(15,12)")
-	}
-
-	// Update longitude column
-	if err := db.Exec("ALTER TABLE gps_data ALTER COLUMN longitude TYPE NUMERIC(15,12)").Error; err != nil {
-		colors.PrintWarning("Failed to update longitude precision: %v", err)
-	} else {
-		colors.PrintSuccess("✓ Updated longitude column to NUMERIC(15,12)")
-	}
-
 	return nil
 }
 

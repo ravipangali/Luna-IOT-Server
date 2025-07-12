@@ -420,18 +420,6 @@ func (s *Server) processLateData(imei string, lat, lng float64, packet *protocol
 		// Check if late data is reasonable compared to expected position
 		distance := s.calculateDistance(lat, lng, expectedLat, expectedLng)
 
-		// Allow reasonable deviation (500m) for late data
-		if distance > 500 {
-			colors.PrintWarning("⏰ Late data rejected: too far from expected position (%.1fm)", distance)
-			return false, lat, lng
-		}
-
-		// Validate speed consistency
-		if !s.validateSpeedConsistency(lat, lng, packet, beforeData, afterData) {
-			colors.PrintWarning("⏰ Late data rejected: speed inconsistency")
-			return false, lat, lng
-		}
-
 		colors.PrintData("⏰", "Late data accepted: within %.1fm of expected position", distance)
 		return true, lat, lng
 	}
@@ -439,15 +427,8 @@ func (s *Server) processLateData(imei string, lat, lng float64, packet *protocol
 	// If only before data exists, validate against it
 	if beforeData != nil {
 		distance := s.calculateDistance(*beforeData.Latitude, *beforeData.Longitude, lat, lng)
-		timeDiff := packet.Timestamp.Sub(beforeData.Timestamp).Seconds()
-
-		if timeDiff > 0 {
-			requiredSpeed := (distance / 1000) / (timeDiff / 3600)
-			if requiredSpeed > 200 {
-				colors.PrintWarning("⏰ Late data rejected: impossible speed %.1f km/h", requiredSpeed)
-				return false, lat, lng
-			}
-		}
+		colors.PrintData("⏰", "Late data accepted with limited validation")
+		return true, lat, lng
 	}
 
 	colors.PrintData("⏰", "Late data accepted with limited validation")
@@ -462,71 +443,14 @@ func (s *Server) processCurrentData(lat, lng float64, packet *protocol.DecodedPa
 	distance := s.calculateDistance(*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
 	timeDiff := packet.Timestamp.Sub(lastGPS.Timestamp).Seconds()
 
-	// Skip validation if time difference is too small (less than 5 seconds)
-	if timeDiff < 5 {
-		if distance < 50 { // Accept only if within 50 meters for very recent points
-			return true, lat, lng
-		} else {
-			colors.PrintWarning("🚫 GPS rejected: too far (%.1fm) for short time interval (%.1fs)", distance, timeDiff)
-			return false, lat, lng
-		}
-	}
-
-	// Calculate required speed in km/h to cover this distance
-	requiredSpeed := (distance / 1000) / (timeDiff / 3600)
-
 	// Get current speed from packet
 	currentSpeed := 0
 	if packet.Speed != nil {
 		currentSpeed = int(*packet.Speed)
 	}
 
-	// Enhanced validation rules:
-
-	// 1. Reject points that would require impossible speeds (>250 km/h)
-	if requiredSpeed > 250 {
-		colors.PrintWarning("🚫 GPS rejected: Required speed %.1f km/h too high (distance: %.1fm, time: %.1fs)",
-			requiredSpeed, distance, timeDiff)
-		return false, lat, lng
-	}
-
-	// 2. Reject points with unrealistic distance jumps for stopped/slow vehicles
-	if currentSpeed < 5 && distance > 500 {
-		colors.PrintWarning("🚫 GPS rejected: Large distance jump %.1fm while vehicle stopped/slow (speed: %d km/h)",
-			distance, currentSpeed)
-		return false, lat, lng
-	}
-
-	// 3. Check for GPS accuracy issues using multiple reference points
-	if len(recentData) >= 3 {
-		avgDistance := s.calculateAverageDistanceFromRecentPoints(lat, lng, recentData[:3])
-		if avgDistance > 2000 && requiredSpeed > 150 {
-			colors.PrintWarning("🚫 GPS rejected: Likely GPS accuracy issue (avg distance: %.1fm, speed: %.1f km/h)",
-				avgDistance, requiredSpeed)
-			return false, lat, lng
-		}
-	}
-
-	// 4. Validate against movement pattern
-	if len(recentData) >= 5 {
-		if !s.validateMovementPattern(lat, lng, recentData[:5]) {
-			colors.PrintWarning("🚫 GPS rejected: Inconsistent movement pattern")
-			return false, lat, lng
-		}
-	}
-
-	// 5. Speed consistency check
-	if currentSpeed > 0 {
-		speedRatio := requiredSpeed / float64(currentSpeed)
-		if speedRatio > 4.0 {
-			colors.PrintWarning("🚫 GPS rejected: Required speed %.1f km/h much higher than reported %d km/h (ratio: %.1f)",
-				requiredSpeed, currentSpeed, speedRatio)
-			return false, lat, lng
-		}
-	}
-
-	colors.PrintData("✅", "GPS validation passed: distance=%.1fm, time=%.1fs, required_speed=%.1f km/h, reported_speed=%d km/h",
-		distance, timeDiff, requiredSpeed, currentSpeed)
+	colors.PrintData("✅", "GPS validation passed: distance=%.1fm, time=%.1fs, reported_speed=%d km/h",
+		distance, timeDiff, currentSpeed)
 
 	return true, lat, lng
 }
@@ -547,91 +471,6 @@ func (s *Server) interpolatePosition(before, after *models.GPSData, targetTime t
 	lng := *before.Longitude + (*after.Longitude-*before.Longitude)*ratio
 
 	return lat, lng
-}
-
-// validateSpeedConsistency checks if the speed is consistent with surrounding data points
-func (s *Server) validateSpeedConsistency(lat, lng float64, packet *protocol.DecodedPacket, before, after *models.GPSData) bool {
-	// Calculate speed to previous point
-	distToPrev := s.calculateDistance(*before.Latitude, *before.Longitude, lat, lng)
-	timeToPrev := packet.Timestamp.Sub(before.Timestamp).Seconds()
-
-	// Calculate speed to next point
-	distToNext := s.calculateDistance(lat, lng, *after.Latitude, *after.Longitude)
-	timeToNext := after.Timestamp.Sub(packet.Timestamp).Seconds()
-
-	if timeToPrev > 0 && timeToNext > 0 {
-		speedToPrev := (distToPrev / 1000) / (timeToPrev / 3600)
-		speedToNext := (distToNext / 1000) / (timeToNext / 3600)
-
-		// Check if speeds are reasonable (not exceeding 200 km/h)
-		if speedToPrev > 200 || speedToNext > 200 {
-			return false
-		}
-
-		// Check if speed change is reasonable
-		speedDiff := math.Abs(speedToPrev - speedToNext)
-		if speedDiff > 100 { // Allow max 100 km/h speed change
-			return false
-		}
-	}
-
-	return true
-}
-
-// calculateAverageDistanceFromRecentPoints calculates average distance from recent GPS points
-func (s *Server) calculateAverageDistanceFromRecentPoints(lat, lng float64, recentPoints []models.GPSData) float64 {
-	if len(recentPoints) == 0 {
-		return 0
-	}
-
-	totalDistance := 0.0
-	for _, point := range recentPoints {
-		distance := s.calculateDistance(*point.Latitude, *point.Longitude, lat, lng)
-		totalDistance += distance
-	}
-
-	return totalDistance / float64(len(recentPoints))
-}
-
-// validateMovementPattern checks if the GPS point fits the recent movement pattern
-func (s *Server) validateMovementPattern(lat, lng float64, recentPoints []models.GPSData) bool {
-	if len(recentPoints) < 3 {
-		return true // Not enough data for pattern analysis
-	}
-
-	// Calculate recent movement vector
-	recent1 := recentPoints[0]
-	recent2 := recentPoints[1]
-	recent3 := recentPoints[2]
-
-	// Calculate direction vectors
-	dir1Lat := *recent1.Latitude - *recent2.Latitude
-	dir1Lng := *recent1.Longitude - *recent2.Longitude
-
-	dir2Lat := *recent2.Latitude - *recent3.Latitude
-	dir2Lng := *recent2.Longitude - *recent3.Longitude
-
-	// Calculate direction to new point
-	newDirLat := lat - *recent1.Latitude
-	newDirLng := lng - *recent1.Longitude
-
-	// Calculate angles (simplified)
-	recentAngle := math.Atan2(dir1Lat, dir1Lng)
-	prevAngle := math.Atan2(dir2Lat, dir2Lng)
-	newAngle := math.Atan2(newDirLat, newDirLng)
-
-	// Check for sudden direction changes (>120 degrees)
-	angleDiff1 := math.Abs(recentAngle - newAngle)
-	angleDiff2 := math.Abs(prevAngle - newAngle)
-
-	if angleDiff1 > 2.0 && angleDiff2 > 2.0 { // ~120 degrees in radians
-		// Check if this might be a valid turn by looking at recent speed data
-		if recent1.Speed != nil && *recent1.Speed > 30 {
-			return false // High speed sharp turn is suspicious
-		}
-	}
-
-	return true
 }
 
 // calculateDistance calculates the distance between two GPS points in meters

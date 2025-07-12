@@ -80,12 +80,6 @@ func RunMigrations() error {
 	}
 	colors.PrintSuccess("✓ User image column updated")
 
-	// Update latitude and longitude precision
-	if err := updateLatLongPrecision(DB); err != nil {
-		return fmt.Errorf("failed to update GPS precision: %v", err)
-	}
-	colors.PrintSuccess("✓ GPS coordinate precision enhanced")
-
 	// The ensureUserVehicleColumns function now uses AutoMigrate, so this serves as a redundant check.
 	// This is safe to keep.
 	if err := ensureUserVehicleColumns(DB); err != nil {
