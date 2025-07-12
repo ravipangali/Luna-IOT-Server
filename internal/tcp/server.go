@@ -229,137 +229,407 @@ func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn
 	return potentialIMEI
 }
 
-// handleGPSPacket processes GPS data packets
+// handleGPSPacket processes GPS data packets with advanced filtering
 func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
 
-	// Enhanced GPS validation to prevent zigzag routes
-	var hasValidGPS bool
-	if packet.Latitude != nil && packet.Longitude != nil && packet.Speed != nil {
-		lat := *packet.Latitude
-		lng := *packet.Longitude
-		speed := *packet.Speed
-
-		// Only process GPS data when speed is not null - this prevents many invalid coordinates
-		colors.PrintData("🌍", "Processing GPS with speed: Lat=%.12f, Lng=%.12f, Speed=%d km/h", lat, lng, speed)
-
-		// Convert negative latitude to positive (remove minus sign)
-		if lat < 0 {
-			lat = -lat
-			packet.Latitude = &lat
-		}
-
-		// Basic coordinate range validation
-		if lat > 0 && lat <= 90 && lng >= -180 && lng <= 180 {
-			// Additional validation to prevent zigzag routes
-			isValidGPS := s.validateGPSAccuracy(deviceIMEI, lat, lng, packet)
-
-			if isValidGPS {
-				hasValidGPS = true
-				colors.PrintData("📍", "Valid GPS Location: Lat=%.12f, Lng=%.12f, Speed=%d km/h",
-					lat, lng, speed)
-			} else {
-				colors.PrintWarning("📍 GPS point rejected (accuracy filter): Lat=%.12f, Lng=%.12f", lat, lng)
-			}
-		} else {
-			colors.PrintWarning("📍 Invalid GPS coordinates (out of range): Lat=%.12f, Lng=%.12f", lat, lng)
-		}
-	} else {
-		// Log why GPS data was skipped
-		if packet.Latitude == nil || packet.Longitude == nil {
-			colors.PrintWarning("⚠️ Skipping GPS: Missing coordinates (Lat=%v, Lng=%v)", packet.Latitude, packet.Longitude)
-		} else if packet.Speed == nil {
-			colors.PrintWarning("⚠️ Skipping GPS: Speed is null (indicates unreliable GPS data)")
-		}
+	// Validate GPS data exists
+	if packet.Latitude == nil || packet.Longitude == nil {
+		colors.PrintWarning("⚠️ Skipping GPS: Missing coordinates (Lat=%v, Lng=%v)", packet.Latitude, packet.Longitude)
+		return
 	}
+
+	lat := *packet.Latitude
+	lng := *packet.Longitude
+
+	// Convert negative latitude to positive (remove minus sign)
+	if lat < 0 {
+		lat = -lat
+		packet.Latitude = &lat
+	}
+
+	// Basic coordinate range validation
+	if lat <= 0 || lat > 90 || lng < -180 || lng > 180 {
+		colors.PrintWarning("📍 Invalid GPS coordinates (out of range): Lat=%.12f, Lng=%.12f", lat, lng)
+		return
+	}
+
+	colors.PrintData("🌍", "Processing GPS: Lat=%.12f, Lng=%.12f, Speed=%v km/h, Ignition=%s",
+		lat, lng, packet.Speed, packet.Ignition)
+
+	// Step 1: Check ignition status requirement
+	shouldAcceptGPS := s.shouldAcceptGPSBasedOnIgnition(deviceIMEI, packet)
+	if !shouldAcceptGPS {
+		colors.PrintWarning("🚫 GPS rejected: Ignition is OFF or not valid")
+		// Still save status data without coordinates
+		s.saveStatusOnlyData(packet, deviceIMEI)
+		return
+	}
+
+	// Step 2: Check for duplicate coordinates
+	if s.isDuplicateCoordinates(deviceIMEI, lat, lng) {
+		colors.PrintWarning("🚫 GPS rejected: Duplicate coordinates")
+		return
+	}
+
+	// Step 3: Advanced GPS accuracy validation with late data handling
+	isValidGPS, processedLat, processedLng := s.validateAndProcessGPSWithHistory(deviceIMEI, lat, lng, packet)
+	if !isValidGPS {
+		colors.PrintWarning("🚫 GPS rejected: Failed accuracy validation")
+		return
+	}
+
+	// Update packet with processed coordinates
+	packet.Latitude = &processedLat
+	packet.Longitude = &processedLng
 
 	// Save GPS data and broadcast to WebSocket clients
 	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
 		gpsData := s.buildGPSData(packet, deviceIMEI)
 
-		// Only save if we have valid GPS coordinates or this is a status update
-		if hasValidGPS || packet.ProtocolName == "STATUS_INFO" {
-			if err := db.GetDB().Create(&gpsData).Error; err != nil {
-				colors.PrintError("Error saving GPS data: %v", err)
-			} else {
-				colors.PrintSuccess("GPS data saved for device %s", deviceIMEI)
-
-				// Broadcast the new full GPS data object over WebSocket
-				if http.WSHub != nil {
-					go http.WSHub.BroadcastFullGPSUpdate(&gpsData)
-				}
-			}
+		if err := db.GetDB().Create(&gpsData).Error; err != nil {
+			colors.PrintError("Error saving GPS data: %v", err)
 		} else {
-			colors.PrintWarning("Skipping GPS data save due to invalid coordinates")
+			colors.PrintSuccess("✅ GPS data saved for device %s (Lat=%.12f, Lng=%.12f)",
+				deviceIMEI, processedLat, processedLng)
+
+			// Broadcast the new full GPS data object over WebSocket
+			if http.WSHub != nil {
+				go http.WSHub.BroadcastFullGPSUpdate(&gpsData)
+			}
 		}
 	}
 }
 
-// validateGPSAccuracy performs advanced GPS validation to prevent zigzag routes
-func (s *Server) validateGPSAccuracy(imei string, lat, lng float64, packet *protocol.DecodedPacket) bool {
-	// Get the latest GPS point for this device
-	var lastGPS models.GPSData
-	if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
-		imei).Order("timestamp DESC").First(&lastGPS).Error; err != nil {
-		// No previous GPS data, accept first point
-		return true
+// shouldAcceptGPSBasedOnIgnition checks if GPS should be accepted based on ignition status
+func (s *Server) shouldAcceptGPSBasedOnIgnition(imei string, packet *protocol.DecodedPacket) bool {
+	// First check current packet ignition
+	currentIgnition := packet.Ignition
+
+	// If current packet has ignition data
+	if currentIgnition != "" {
+		if currentIgnition == "ON" {
+			colors.PrintData("🔑", "Ignition ON in current packet - accepting GPS")
+			return true
+		} else {
+			colors.PrintWarning("🔑 Ignition OFF in current packet - rejecting GPS")
+			return false
+		}
 	}
 
-	// Calculate distance between points
-	distance := s.calculateDistance(*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
+	// If no ignition in current packet, check database for last known ignition status
+	var lastStatus models.GPSData
+	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != ''", imei).
+		Order("timestamp DESC").
+		First(&lastStatus).Error
 
-	// Calculate time difference in seconds
+	if err != nil {
+		colors.PrintWarning("🔑 No ignition history found for device %s - rejecting GPS", imei)
+		return false
+	}
+
+	if lastStatus.Ignition == "ON" {
+		colors.PrintData("🔑", "Last known ignition status: ON - accepting GPS")
+		return true
+	} else {
+		colors.PrintWarning("🔑 Last known ignition status: %s - rejecting GPS", lastStatus.Ignition)
+		return false
+	}
+}
+
+// isDuplicateCoordinates checks if the coordinates are the same as the last saved ones
+func (s *Server) isDuplicateCoordinates(imei string, lat, lng float64) bool {
+	var lastGPS models.GPSData
+	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", imei).
+		Order("timestamp DESC").
+		First(&lastGPS).Error
+
+	if err != nil {
+		// No previous GPS data, not a duplicate
+		return false
+	}
+
+	// Check if coordinates are exactly the same (with precision tolerance)
+	const tolerance = 0.000001 // ~1 meter precision
+	latDiff := math.Abs(*lastGPS.Latitude - lat)
+	lngDiff := math.Abs(*lastGPS.Longitude - lng)
+
+	isDuplicate := latDiff < tolerance && lngDiff < tolerance
+	if isDuplicate {
+		colors.PrintWarning("📍 Duplicate coordinates detected: Last(%.12f,%.12f) Current(%.12f,%.12f)",
+			*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
+	}
+
+	return isDuplicate
+}
+
+// validateAndProcessGPSWithHistory validates GPS data against historical data and handles late data
+func (s *Server) validateAndProcessGPSWithHistory(imei string, lat, lng float64, packet *protocol.DecodedPacket) (bool, float64, float64) {
+	// Get last 10 GPS points with valid coordinates for analysis
+	var recentGPSData []models.GPSData
+	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", imei).
+		Order("timestamp DESC").
+		Limit(10).
+		Find(&recentGPSData).Error
+
+	if err != nil || len(recentGPSData) == 0 {
+		// No previous GPS data, accept first point
+		colors.PrintData("🔍", "No GPS history found - accepting first point")
+		return true, lat, lng
+	}
+
+	// Analyze if this is late data (older than the most recent data)
+	mostRecentTime := recentGPSData[0].Timestamp
+	isLateData := packet.Timestamp.Before(mostRecentTime)
+
+	if isLateData {
+		colors.PrintData("⏰", "Late data detected: packet time=%v, most recent=%v",
+			packet.Timestamp, mostRecentTime)
+		return s.processLateData(imei, lat, lng, packet, recentGPSData)
+	}
+
+	// Process current/future data
+	return s.processCurrentData(lat, lng, packet, recentGPSData)
+}
+
+// processLateData handles GPS data that arrived late (timestamp is older than recent data)
+func (s *Server) processLateData(imei string, lat, lng float64, packet *protocol.DecodedPacket, recentData []models.GPSData) (bool, float64, float64) {
+	colors.PrintData("⏰", "Processing late GPS data for device %s", imei)
+
+	// Find the correct position in timeline for this late data
+	var beforeData, afterData *models.GPSData
+
+	for i := len(recentData) - 1; i >= 0; i-- {
+		if packet.Timestamp.After(recentData[i].Timestamp) {
+			if i > 0 {
+				beforeData = &recentData[i]
+				afterData = &recentData[i-1]
+			} else {
+				beforeData = &recentData[i]
+			}
+			break
+		}
+	}
+
+	// If we found surrounding data points, validate against them
+	if beforeData != nil && afterData != nil {
+		// Calculate expected position based on interpolation
+		expectedLat, expectedLng := s.interpolatePosition(beforeData, afterData, packet.Timestamp)
+
+		// Check if late data is reasonable compared to expected position
+		distance := s.calculateDistance(lat, lng, expectedLat, expectedLng)
+
+		// Allow reasonable deviation (500m) for late data
+		if distance > 500 {
+			colors.PrintWarning("⏰ Late data rejected: too far from expected position (%.1fm)", distance)
+			return false, lat, lng
+		}
+
+		// Validate speed consistency
+		if !s.validateSpeedConsistency(lat, lng, packet, beforeData, afterData) {
+			colors.PrintWarning("⏰ Late data rejected: speed inconsistency")
+			return false, lat, lng
+		}
+
+		colors.PrintData("⏰", "Late data accepted: within %.1fm of expected position", distance)
+		return true, lat, lng
+	}
+
+	// If only before data exists, validate against it
+	if beforeData != nil {
+		distance := s.calculateDistance(*beforeData.Latitude, *beforeData.Longitude, lat, lng)
+		timeDiff := packet.Timestamp.Sub(beforeData.Timestamp).Seconds()
+
+		if timeDiff > 0 {
+			requiredSpeed := (distance / 1000) / (timeDiff / 3600)
+			if requiredSpeed > 200 {
+				colors.PrintWarning("⏰ Late data rejected: impossible speed %.1f km/h", requiredSpeed)
+				return false, lat, lng
+			}
+		}
+	}
+
+	colors.PrintData("⏰", "Late data accepted with limited validation")
+	return true, lat, lng
+}
+
+// processCurrentData handles current/future GPS data
+func (s *Server) processCurrentData(lat, lng float64, packet *protocol.DecodedPacket, recentData []models.GPSData) (bool, float64, float64) {
+	lastGPS := recentData[0]
+
+	// Calculate distance and time difference
+	distance := s.calculateDistance(*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
 	timeDiff := packet.Timestamp.Sub(lastGPS.Timestamp).Seconds()
 
 	// Skip validation if time difference is too small (less than 5 seconds)
 	if timeDiff < 5 {
-		return distance < 100 // Accept only if within 100 meters for very recent points
+		if distance < 50 { // Accept only if within 50 meters for very recent points
+			return true, lat, lng
+		} else {
+			colors.PrintWarning("🚫 GPS rejected: too far (%.1fm) for short time interval (%.1fs)", distance, timeDiff)
+			return false, lat, lng
+		}
 	}
 
 	// Calculate required speed in km/h to cover this distance
-	requiredSpeed := (distance / 1000) / (timeDiff / 3600) // Convert to km/h
+	requiredSpeed := (distance / 1000) / (timeDiff / 3600)
 
-	// Get current speed from packet (default to 0 if not available)
+	// Get current speed from packet
 	currentSpeed := 0
 	if packet.Speed != nil {
 		currentSpeed = int(*packet.Speed)
 	}
 
-	// Validation rules to prevent zigzag routes:
+	// Enhanced validation rules:
 
-	// 1. Reject points that would require impossible speeds (>200 km/h for normal vehicles)
-	if requiredSpeed > 200 {
-		colors.PrintWarning("GPS rejected: Required speed %.1f km/h too high (distance: %.1fm, time: %.1fs)",
+	// 1. Reject points that would require impossible speeds (>250 km/h)
+	if requiredSpeed > 250 {
+		colors.PrintWarning("🚫 GPS rejected: Required speed %.1f km/h too high (distance: %.1fm, time: %.1fs)",
 			requiredSpeed, distance, timeDiff)
-		return false
+		return false, lat, lng
 	}
 
-	// 2. Reject points with unrealistic distance jumps (>1km) for stopped/slow vehicles
-	if currentSpeed < 5 && distance > 1000 {
-		colors.PrintWarning("GPS rejected: Large distance jump %.1fm while vehicle stopped/slow (speed: %d km/h)",
+	// 2. Reject points with unrealistic distance jumps for stopped/slow vehicles
+	if currentSpeed < 5 && distance > 500 {
+		colors.PrintWarning("🚫 GPS rejected: Large distance jump %.1fm while vehicle stopped/slow (speed: %d km/h)",
 			distance, currentSpeed)
-		return false
+		return false, lat, lng
 	}
 
-	// 3. Reject points that are too far from reported speed
-	maxAllowedSpeed := float64(currentSpeed) * 3 // Allow 3x reported speed for tolerance
-	if maxAllowedSpeed > 0 && requiredSpeed > maxAllowedSpeed {
-		colors.PrintWarning("GPS rejected: Required speed %.1f km/h much higher than reported %d km/h",
-			requiredSpeed, currentSpeed)
-		return false
+	// 3. Check for GPS accuracy issues using multiple reference points
+	if len(recentData) >= 3 {
+		avgDistance := s.calculateAverageDistanceFromRecentPoints(lat, lng, recentData[:3])
+		if avgDistance > 2000 && requiredSpeed > 150 {
+			colors.PrintWarning("🚫 GPS rejected: Likely GPS accuracy issue (avg distance: %.1fm, speed: %.1f km/h)",
+				avgDistance, requiredSpeed)
+			return false, lat, lng
+		}
 	}
 
-	// 4. Check for GPS accuracy issues - reject points requiring >150km/h in urban areas
-	// (Assuming most tracking happens in urban/suburban areas)
-	if requiredSpeed > 150 && distance < 10000 { // Short distance but high speed = likely GPS error
-		colors.PrintWarning("GPS rejected: Likely GPS accuracy issue (speed: %.1f km/h, distance: %.1fm)",
-			requiredSpeed, distance)
-		return false
+	// 4. Validate against movement pattern
+	if len(recentData) >= 5 {
+		if !s.validateMovementPattern(lat, lng, recentData[:5]) {
+			colors.PrintWarning("🚫 GPS rejected: Inconsistent movement pattern")
+			return false, lat, lng
+		}
 	}
 
-	colors.PrintData("🔍", "GPS validation passed: distance=%.1fm, time=%.1fs, required_speed=%.1f km/h, reported_speed=%d km/h",
+	// 5. Speed consistency check
+	if currentSpeed > 0 {
+		speedRatio := requiredSpeed / float64(currentSpeed)
+		if speedRatio > 4.0 {
+			colors.PrintWarning("🚫 GPS rejected: Required speed %.1f km/h much higher than reported %d km/h (ratio: %.1f)",
+				requiredSpeed, currentSpeed, speedRatio)
+			return false, lat, lng
+		}
+	}
+
+	colors.PrintData("✅", "GPS validation passed: distance=%.1fm, time=%.1fs, required_speed=%.1f km/h, reported_speed=%d km/h",
 		distance, timeDiff, requiredSpeed, currentSpeed)
+
+	return true, lat, lng
+}
+
+// interpolatePosition calculates expected position between two GPS points at a given time
+func (s *Server) interpolatePosition(before, after *models.GPSData, targetTime time.Time) (float64, float64) {
+	totalTime := after.Timestamp.Sub(before.Timestamp).Seconds()
+	elapsedTime := targetTime.Sub(before.Timestamp).Seconds()
+
+	if totalTime <= 0 {
+		return *before.Latitude, *before.Longitude
+	}
+
+	ratio := elapsedTime / totalTime
+
+	// Linear interpolation
+	lat := *before.Latitude + (*after.Latitude-*before.Latitude)*ratio
+	lng := *before.Longitude + (*after.Longitude-*before.Longitude)*ratio
+
+	return lat, lng
+}
+
+// validateSpeedConsistency checks if the speed is consistent with surrounding data points
+func (s *Server) validateSpeedConsistency(lat, lng float64, packet *protocol.DecodedPacket, before, after *models.GPSData) bool {
+	// Calculate speed to previous point
+	distToPrev := s.calculateDistance(*before.Latitude, *before.Longitude, lat, lng)
+	timeToPrev := packet.Timestamp.Sub(before.Timestamp).Seconds()
+
+	// Calculate speed to next point
+	distToNext := s.calculateDistance(lat, lng, *after.Latitude, *after.Longitude)
+	timeToNext := after.Timestamp.Sub(packet.Timestamp).Seconds()
+
+	if timeToPrev > 0 && timeToNext > 0 {
+		speedToPrev := (distToPrev / 1000) / (timeToPrev / 3600)
+		speedToNext := (distToNext / 1000) / (timeToNext / 3600)
+
+		// Check if speeds are reasonable (not exceeding 200 km/h)
+		if speedToPrev > 200 || speedToNext > 200 {
+			return false
+		}
+
+		// Check if speed change is reasonable
+		speedDiff := math.Abs(speedToPrev - speedToNext)
+		if speedDiff > 100 { // Allow max 100 km/h speed change
+			return false
+		}
+	}
+
+	return true
+}
+
+// calculateAverageDistanceFromRecentPoints calculates average distance from recent GPS points
+func (s *Server) calculateAverageDistanceFromRecentPoints(lat, lng float64, recentPoints []models.GPSData) float64 {
+	if len(recentPoints) == 0 {
+		return 0
+	}
+
+	totalDistance := 0.0
+	for _, point := range recentPoints {
+		distance := s.calculateDistance(*point.Latitude, *point.Longitude, lat, lng)
+		totalDistance += distance
+	}
+
+	return totalDistance / float64(len(recentPoints))
+}
+
+// validateMovementPattern checks if the GPS point fits the recent movement pattern
+func (s *Server) validateMovementPattern(lat, lng float64, recentPoints []models.GPSData) bool {
+	if len(recentPoints) < 3 {
+		return true // Not enough data for pattern analysis
+	}
+
+	// Calculate recent movement vector
+	recent1 := recentPoints[0]
+	recent2 := recentPoints[1]
+	recent3 := recentPoints[2]
+
+	// Calculate direction vectors
+	dir1Lat := *recent1.Latitude - *recent2.Latitude
+	dir1Lng := *recent1.Longitude - *recent2.Longitude
+
+	dir2Lat := *recent2.Latitude - *recent3.Latitude
+	dir2Lng := *recent2.Longitude - *recent3.Longitude
+
+	// Calculate direction to new point
+	newDirLat := lat - *recent1.Latitude
+	newDirLng := lng - *recent1.Longitude
+
+	// Calculate angles (simplified)
+	recentAngle := math.Atan2(dir1Lat, dir1Lng)
+	prevAngle := math.Atan2(dir2Lat, dir2Lng)
+	newAngle := math.Atan2(newDirLat, newDirLng)
+
+	// Check for sudden direction changes (>120 degrees)
+	angleDiff1 := math.Abs(recentAngle - newAngle)
+	angleDiff2 := math.Abs(prevAngle - newAngle)
+
+	if angleDiff1 > 2.0 && angleDiff2 > 2.0 { // ~120 degrees in radians
+		// Check if this might be a valid turn by looking at recent speed data
+		if recent1.Speed != nil && *recent1.Speed > 30 {
+			return false // High speed sharp turn is suspicious
+		}
+	}
 
 	return true
 }
@@ -381,6 +651,29 @@ func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
 	return earthRadius * c
+}
+
+// saveStatusOnlyData saves status information without GPS coordinates
+func (s *Server) saveStatusOnlyData(packet *protocol.DecodedPacket, deviceIMEI string) {
+	// Create status data without coordinates
+	statusData := s.buildStatusData(packet, deviceIMEI)
+
+	// Clear coordinates since ignition is off
+	statusData.Latitude = nil
+	statusData.Longitude = nil
+	statusData.Speed = nil
+	statusData.Course = nil
+
+	if err := db.GetDB().Create(&statusData).Error; err != nil {
+		colors.PrintError("Error saving status-only data: %v", err)
+	} else {
+		colors.PrintSuccess("Status-only data saved for device %s (ignition off)", deviceIMEI)
+
+		// Broadcast status update without coordinates
+		if http.WSHub != nil {
+			go http.WSHub.BroadcastStatusUpdate(&statusData, "", "")
+		}
+	}
 }
 
 // handleStatusPacket processes device status packets
