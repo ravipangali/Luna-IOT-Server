@@ -426,7 +426,6 @@ func (s *Server) processLateData(imei string, lat, lng float64, packet *protocol
 
 	// If only before data exists, validate against it
 	if beforeData != nil {
-		distance := s.calculateDistance(*beforeData.Latitude, *beforeData.Longitude, lat, lng)
 		colors.PrintData("⏰", "Late data accepted with limited validation")
 		return true, lat, lng
 	}
