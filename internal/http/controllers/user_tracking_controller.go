@@ -372,16 +372,20 @@ func (utc *UserTrackingController) GetMyVehicleHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": map[string]interface{}{
-			"imei":        imei,
-			"vehicle":     userVehicle.Vehicle,
-			"permissions": userVehicle.GetPermissions(),
-			"history":     gpsData,
-			"page":        page,
-			"limit":       limit,
-			"count":       len(gpsData),
+			"imei":                imei,
+			"vehicle":             userVehicle.Vehicle,
+			"permissions":         userVehicle.GetPermissions(),
+			"history":             gpsData,
+			"page":                page,
+			"limit":               limit,
+			"count":               len(gpsData),
+			"overspeed_threshold": userVehicle.Vehicle.Overspeed, // Add overspeed threshold
 		},
 		"message": "Vehicle history retrieved successfully",
 	})
+
+	// Debug: Log the overspeed threshold being sent
+	colors.PrintInfo("Vehicle history response - IMEI: %s, Overspeed threshold: %d km/h", imei, userVehicle.Vehicle.Overspeed)
 }
 
 // GetMyVehicleRoute returns route data for user's vehicle
