@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"luna_iot_server/internal/db"
@@ -355,13 +354,10 @@ func (utc *UserTrackingController) GetMyVehicleHistory(c *gin.Context) {
 		}
 	}
 
-	// Pagination
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	offset := (page - 1) * limit
-
+	// Get ALL GPS data for the date range (no pagination for history)
+	// Order by timestamp ASC (oldest first) for proper route plotting
 	var gpsData []models.GPSData
-	if err := query.Order("timestamp DESC").Limit(limit).Offset(offset).Find(&gpsData).Error; err != nil {
+	if err := query.Order("timestamp ASC").Find(&gpsData).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to fetch GPS history",
@@ -376,8 +372,6 @@ func (utc *UserTrackingController) GetMyVehicleHistory(c *gin.Context) {
 			"vehicle":             userVehicle.Vehicle,
 			"permissions":         userVehicle.GetPermissions(),
 			"history":             gpsData,
-			"page":                page,
-			"limit":               limit,
 			"count":               len(gpsData),
 			"overspeed_threshold": userVehicle.Vehicle.Overspeed, // Add overspeed threshold
 		},
