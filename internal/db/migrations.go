@@ -13,7 +13,7 @@ func MigrateDB(db *gorm.DB) error {
 	colors.PrintInfo("Running database migrations...")
 
 	// Auto migrate the schema
-	if err := db.AutoMigrate(&models.User{}, &models.Device{}, &models.Vehicle{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Device{}, &models.Vehicle{}, &models.Notification{}, &models.NotificationUser{}); err != nil {
 		colors.PrintError("Failed to run migrations: %v", err)
 		return err
 	}

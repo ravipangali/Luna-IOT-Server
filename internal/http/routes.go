@@ -29,6 +29,8 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	popupController := controllers.NewPopupController()
 	notificationController := controllers.NewNotificationController()
 	testNotificationController := controllers.NewTestNotificationController()
+	notificationManagementController := controllers.NewNotificationManagementController()
+	userSearchController := controllers.NewUserSearchController()
 
 	// Use shared control controller if provided, otherwise create new one
 	var controlController *controllers.ControlController
@@ -328,6 +330,26 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			adminNotifications.POST("/send", notificationController.SendNotification)
 			adminNotifications.POST("/send-to-user/:user_id", notificationController.SendToUser)
 			adminNotifications.POST("/send-to-topic", notificationController.SendToTopic)
+		}
+
+		// Notification management routes (admin only)
+		notificationManagement := v1.Group("/admin/notification-management")
+		notificationManagement.Use(middleware.AuthMiddleware(), middleware.AdminOnlyMiddleware())
+		{
+			notificationManagement.GET("", notificationManagementController.GetNotifications)
+			notificationManagement.POST("", notificationManagementController.CreateNotification)
+			notificationManagement.GET("/:id", notificationManagementController.GetNotification)
+			notificationManagement.PUT("/:id", notificationManagementController.UpdateNotification)
+			notificationManagement.DELETE("/:id", notificationManagementController.DeleteNotification)
+			notificationManagement.POST("/:id/send", notificationManagementController.SendNotification)
+		}
+
+		// User search routes (admin only)
+		userSearch := v1.Group("/admin/user-search")
+		userSearch.Use(middleware.AuthMiddleware(), middleware.AdminOnlyMiddleware())
+		{
+			userSearch.POST("/search", userSearchController.SearchUsers)
+			userSearch.GET("/all", userSearchController.GetAllUsers)
 		}
 
 		// Test notification routes (for development/testing)

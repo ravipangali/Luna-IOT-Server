@@ -37,6 +37,9 @@ type User struct {
 	// Relationships - many-to-many with vehicles through UserVehicle
 	VehicleAccess []UserVehicle `json:"vehicle_access,omitempty" gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 	Vehicles      []Vehicle     `json:"vehicles,omitempty" gorm:"many2many:user_vehicles;foreignKey:ID;joinForeignKey:UserID;References:IMEI;joinReferences:VehicleID"`
+
+	// Relationships - many-to-many with notifications through NotificationUser
+	Notifications []Notification `json:"notifications,omitempty" gorm:"many2many:notification_users;foreignKey:ID;joinForeignKey:UserID;References:ID;joinReferences:NotificationID"`
 }
 
 // TableName specifies the table name for User model
