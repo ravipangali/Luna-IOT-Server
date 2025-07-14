@@ -1,0 +1,92 @@
+package config
+
+import (
+	"context"
+	"log"
+
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/messaging"
+	"google.golang.org/api/option"
+)
+
+type FirebaseConfig struct {
+	ProjectID     string
+	PrivateKeyID  string
+	PrivateKey    string
+	ClientEmail   string
+	ClientID      string
+	AuthURI       string
+	TokenURI      string
+	AuthProvider  string
+	ClientCertURL string
+}
+
+var firebaseApp *firebase.App
+var messagingClient *messaging.Client
+
+func GetFirebaseConfig() *FirebaseConfig {
+	return &FirebaseConfig{
+		ProjectID:     getEnv("FIREBASE_PROJECT_ID", ""),
+		PrivateKeyID:  getEnv("FIREBASE_PRIVATE_KEY_ID", ""),
+		PrivateKey:    getEnv("FIREBASE_PRIVATE_KEY", ""),
+		ClientEmail:   getEnv("FIREBASE_CLIENT_EMAIL", ""),
+		ClientID:      getEnv("FIREBASE_CLIENT_ID", ""),
+		AuthURI:       getEnv("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
+		TokenURI:      getEnv("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+		AuthProvider:  getEnv("FIREBASE_AUTH_PROVIDER", "https://www.googleapis.com/oauth2/v1/certs"),
+		ClientCertURL: getEnv("FIREBASE_CLIENT_CERT_URL", "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk"),
+	}
+}
+
+func InitializeFirebase() error {
+	config := GetFirebaseConfig()
+
+	if config.ProjectID == "" {
+		log.Println("Firebase not configured, push notifications will be disabled")
+		return nil
+	}
+
+	// Create Firebase credentials
+	credentials := map[string]interface{}{
+		"type":                        "service_account",
+		"project_id":                  config.ProjectID,
+		"private_key_id":              config.PrivateKeyID,
+		"private_key":                 config.PrivateKey,
+		"client_email":                config.ClientEmail,
+		"client_id":                   config.ClientID,
+		"auth_uri":                    config.AuthURI,
+		"token_uri":                   config.TokenURI,
+		"auth_provider_x509_cert_url": config.AuthProvider,
+		"client_x509_cert_url":        config.ClientCertURL,
+	}
+
+	// Initialize Firebase app
+	opt := option.WithCredentialsJSON(credentials)
+	app, err := firebase.NewApp(context.Background(), &firebase.Config{
+		ProjectID: config.ProjectID,
+	}, opt)
+
+	if err != nil {
+		return err
+	}
+
+	firebaseApp = app
+
+	// Initialize messaging client
+	messaging, err := app.Messaging(context.Background())
+	if err != nil {
+		return err
+	}
+
+	messagingClient = messaging
+	log.Println("Firebase initialized successfully")
+	return nil
+}
+
+func GetMessagingClient() *messaging.Client {
+	return messagingClient
+}
+
+func IsFirebaseEnabled() bool {
+	return messagingClient != nil
+}

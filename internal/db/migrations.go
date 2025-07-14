@@ -368,3 +368,31 @@ func updateTokenSystem(db *gorm.DB) error {
 	colors.PrintSuccess("Token system updated successfully")
 	return nil
 }
+
+// addFCMTokenColumn adds FCM token column to users table
+func addFCMTokenColumn(db *gorm.DB) error {
+	colors.PrintInfo("Adding FCM token column to users table...")
+
+	// Check if fcm_token column already exists
+	var columnExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.columns 
+		WHERE table_name = 'users' 
+		AND column_name = 'fcm_token'
+	`).Count(&columnExists)
+
+	if columnExists > 0 {
+		colors.PrintInfo("FCM token column already exists in users table")
+		return nil
+	}
+
+	// Add fcm_token column
+	if err := db.Exec("ALTER TABLE users ADD COLUMN fcm_token VARCHAR(255)").Error; err != nil {
+		colors.PrintError("Failed to add fcm_token column: %v", err)
+		return fmt.Errorf("failed to add fcm_token column: %v", err)
+	}
+
+	colors.PrintSuccess("✓ FCM token column added to users table")
+	return nil
+}

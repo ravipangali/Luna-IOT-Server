@@ -29,6 +29,7 @@ type User struct {
 	IsActive  bool           `json:"is_active" gorm:"default:false"`
 	Token     string         `json:"-" gorm:"size:255;uniqueIndex"` // Authentication token (hidden from JSON)
 	TokenExp  *time.Time     `json:"-" gorm:"index"`                // Token expiration time
+	FCMToken  string         `json:"fcm_token" gorm:"size:255"`     // Firebase Cloud Messaging token
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`

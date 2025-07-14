@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
 	"luna_iot_server/internal/http/controllers"
@@ -36,6 +37,15 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize Firebase for push notifications
+	colors.PrintInfo("Initializing Firebase for push notifications...")
+	if err := config.InitializeFirebase(); err != nil {
+		colors.PrintWarning("Failed to initialize Firebase: %v", err)
+		colors.PrintWarning("Push notifications will be disabled")
+	} else {
+		colors.PrintSuccess("Firebase initialized successfully")
+	}
+
 	// Get ports from environment variables or use defaults
 	tcpPort := os.Getenv("TCP_PORT")
 	if tcpPort == "" {
@@ -57,6 +67,11 @@ func main() {
 	colors.PrintServer("🌐", "HTTP Server configured for port %s (REST API Access)", httpPort)
 	colors.PrintSuccess("Database connection established successfully")
 	colors.PrintControl("Oil & Electricity control system enabled")
+	if config.IsFirebaseEnabled() {
+		colors.PrintSuccess("Push notifications enabled")
+	} else {
+		colors.PrintWarning("Push notifications disabled")
+	}
 
 	// Create a wait group to manage both servers
 	var wg sync.WaitGroup
@@ -105,6 +120,15 @@ func main() {
 		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/history", "Get vehicle GPS history")
 		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/route", "Get vehicle GPS route")
 		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/report", "Get vehicle GPS report")
+
+		colors.PrintSubHeader("Notification API Endpoints")
+		colors.PrintEndpoint("POST", "/api/v1/notifications/fcm-token", "Update FCM token")
+		colors.PrintEndpoint("DELETE", "/api/v1/notifications/fcm-token", "Remove FCM token")
+		colors.PrintEndpoint("POST", "/api/v1/notifications/subscribe/:topic", "Subscribe to topic")
+		colors.PrintEndpoint("DELETE", "/api/v1/notifications/subscribe/:topic", "Unsubscribe from topic")
+		colors.PrintEndpoint("POST", "/api/v1/admin/notifications/send", "Send notification to users (Admin)")
+		colors.PrintEndpoint("POST", "/api/v1/admin/notifications/send-to-user/:user_id", "Send notification to specific user (Admin)")
+		colors.PrintEndpoint("POST", "/api/v1/admin/notifications/send-to-topic", "Send notification to topic (Admin)")
 
 		colors.PrintSubHeader("Admin API Endpoints")
 		colors.PrintEndpoint("GET", "/api/v1/users", "List all users (Admin)")

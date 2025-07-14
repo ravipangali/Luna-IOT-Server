@@ -27,6 +27,8 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	dashboardController := controllers.NewDashboardController()
 	rechargeController := controllers.NewRechargeController()
 	popupController := controllers.NewPopupController()
+	notificationController := controllers.NewNotificationController()
+	testNotificationController := controllers.NewTestNotificationController()
 
 	// Use shared control controller if provided, otherwise create new one
 	var controlController *controllers.ControlController
@@ -305,6 +307,35 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		{
 			dashboard.GET("/stats", dashboardController.GetDashboardStats)
 
+		}
+
+		// Notification routes
+		notifications := v1.Group("/notifications")
+		notifications.Use(middleware.AuthMiddleware())
+		{
+			// User routes for managing their own FCM tokens
+			notifications.POST("/fcm-token", notificationController.UpdateFCMToken)
+			notifications.DELETE("/fcm-token", notificationController.RemoveFCMToken)
+			notifications.POST("/subscribe/:topic", notificationController.SubscribeToTopic)
+			notifications.DELETE("/subscribe/:topic", notificationController.UnsubscribeFromTopic)
+		}
+
+		// Admin notification routes
+		adminNotifications := v1.Group("/admin/notifications")
+		adminNotifications.Use(middleware.AuthMiddleware(), middleware.AdminOnlyMiddleware())
+		{
+			// Send notifications to specific users
+			adminNotifications.POST("/send", notificationController.SendNotification)
+			adminNotifications.POST("/send-to-user/:user_id", notificationController.SendToUser)
+			adminNotifications.POST("/send-to-topic", notificationController.SendToTopic)
+		}
+
+		// Test notification routes (for development/testing)
+		testNotifications := v1.Group("/test/notifications")
+		testNotifications.Use(middleware.AuthMiddleware())
+		{
+			testNotifications.POST("/send", testNotificationController.SendTestNotification)
+			testNotifications.POST("/send-to-topic/:topic", testNotificationController.SendTestTopicNotification)
 		}
 	}
 
