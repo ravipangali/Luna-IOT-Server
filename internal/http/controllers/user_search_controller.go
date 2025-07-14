@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,14 +44,22 @@ func (usc *UserSearchController) SearchUsers(c *gin.Context) {
 		return
 	}
 
+	// Debug logging
+	fmt.Printf("Search query: '%s'\n", query)
+
 	database := db.GetDB()
 	var users []models.User
 
-	// Search by phone number (exact match) or name (partial match)
+	// Search by phone number (partial match) or name (partial match)
+	// Use ILIKE for case-insensitive search and % for partial matching
+	searchQuery := "%" + query + "%"
+	fmt.Printf("Database search query: phone ILIKE '%s' OR name ILIKE '%s'\n", searchQuery, searchQuery)
+
 	if err := database.
-		Where("phone LIKE ? OR name ILIKE ?", query, "%"+query+"%").
+		Where("phone ILIKE ? OR name ILIKE ?", searchQuery, searchQuery).
 		Limit(20).
 		Find(&users).Error; err != nil {
+		fmt.Printf("Database error: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "Failed to search users",
@@ -58,6 +67,8 @@ func (usc *UserSearchController) SearchUsers(c *gin.Context) {
 		})
 		return
 	}
+
+	fmt.Printf("Found %d users\n", len(users))
 
 	// Convert to safe user data (without sensitive information)
 	var safeUsers []map[string]interface{}
