@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
 	firebase "firebase.google.com/go/v4"
@@ -60,8 +61,14 @@ func InitializeFirebase() error {
 		"client_x509_cert_url":        config.ClientCertURL,
 	}
 
+	// Convert credentials to JSON bytes
+	credentialsJSON, err := json.Marshal(credentials)
+	if err != nil {
+		return err
+	}
+
 	// Initialize Firebase app
-	opt := option.WithCredentialsJSON(credentials)
+	opt := option.WithCredentialsJSON(credentialsJSON)
 	app, err := firebase.NewApp(context.Background(), &firebase.Config{
 		ProjectID: config.ProjectID,
 	}, opt)
