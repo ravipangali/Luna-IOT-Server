@@ -258,12 +258,10 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	colors.PrintData("🌍", "Processing GPS: Lat=%.12f, Lng=%.12f, Speed=%v km/h, Ignition=%s",
 		lat, lng, packet.Speed, packet.Ignition)
 
-	// Step 1: Check ignition status requirement
+	// Step 1: Check ignition status requirement (STRICT)
 	shouldAcceptGPS := s.shouldAcceptGPSBasedOnIgnition(deviceIMEI, packet)
 	if !shouldAcceptGPS {
-		colors.PrintWarning("🚫 GPS rejected: Ignition is OFF or not valid")
-		// Still save status data without coordinates
-		s.saveStatusOnlyData(packet, deviceIMEI)
+		colors.PrintWarning("🚫 GPS rejected: Ignition is OFF - ignoring completely")
 		return
 	}
 
@@ -273,17 +271,6 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 		return
 	}
 
-	// Step 3: Advanced GPS accuracy validation with late data handling
-	isValidGPS, processedLat, processedLng := s.validateAndProcessGPSWithHistory(deviceIMEI, lat, lng, packet)
-	if !isValidGPS {
-		colors.PrintWarning("🚫 GPS rejected: Failed accuracy validation")
-		return
-	}
-
-	// Update packet with processed coordinates
-	packet.Latitude = &processedLat
-	packet.Longitude = &processedLng
-
 	// Save GPS data and broadcast to WebSocket clients
 	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
 		gpsData := s.buildGPSData(packet, deviceIMEI)
@@ -292,7 +279,7 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 			colors.PrintError("Error saving GPS data: %v", err)
 		} else {
 			colors.PrintSuccess("✅ GPS data saved for device %s (Lat=%.12f, Lng=%.12f)",
-				deviceIMEI, processedLat, processedLng)
+				deviceIMEI, lat, lng)
 
 			// Broadcast the new full GPS data object over WebSocket
 			if http.WSHub != nil {
@@ -364,114 +351,6 @@ func (s *Server) isDuplicateCoordinates(imei string, lat, lng float64) bool {
 	return isDuplicate
 }
 
-// validateAndProcessGPSWithHistory validates GPS data against historical data and handles late data
-func (s *Server) validateAndProcessGPSWithHistory(imei string, lat, lng float64, packet *protocol.DecodedPacket) (bool, float64, float64) {
-	// Get last 10 GPS points with valid coordinates for analysis
-	var recentGPSData []models.GPSData
-	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", imei).
-		Order("timestamp DESC").
-		Limit(10).
-		Find(&recentGPSData).Error
-
-	if err != nil || len(recentGPSData) == 0 {
-		// No previous GPS data, accept first point
-		colors.PrintData("🔍", "No GPS history found - accepting first point")
-		return true, lat, lng
-	}
-
-	// Analyze if this is late data (older than the most recent data)
-	mostRecentTime := recentGPSData[0].Timestamp
-	isLateData := packet.Timestamp.Before(mostRecentTime)
-
-	if isLateData {
-		colors.PrintData("⏰", "Late data detected: packet time=%v, most recent=%v",
-			packet.Timestamp, mostRecentTime)
-		return s.processLateData(imei, lat, lng, packet, recentGPSData)
-	}
-
-	// Process current/future data
-	return s.processCurrentData(lat, lng, packet, recentGPSData)
-}
-
-// processLateData handles GPS data that arrived late (timestamp is older than recent data)
-func (s *Server) processLateData(imei string, lat, lng float64, packet *protocol.DecodedPacket, recentData []models.GPSData) (bool, float64, float64) {
-	colors.PrintData("⏰", "Processing late GPS data for device %s", imei)
-
-	// Find the correct position in timeline for this late data
-	var beforeData, afterData *models.GPSData
-
-	for i := len(recentData) - 1; i >= 0; i-- {
-		if packet.Timestamp.After(recentData[i].Timestamp) {
-			if i > 0 {
-				beforeData = &recentData[i]
-				afterData = &recentData[i-1]
-			} else {
-				beforeData = &recentData[i]
-			}
-			break
-		}
-	}
-
-	// If we found surrounding data points, validate against them
-	if beforeData != nil && afterData != nil {
-		// Calculate expected position based on interpolation
-		expectedLat, expectedLng := s.interpolatePosition(beforeData, afterData, packet.Timestamp)
-
-		// Check if late data is reasonable compared to expected position
-		distance := s.calculateDistance(lat, lng, expectedLat, expectedLng)
-
-		colors.PrintData("⏰", "Late data accepted: within %.1fm of expected position", distance)
-		return true, lat, lng
-	}
-
-	// If only before data exists, validate against it
-	if beforeData != nil {
-		colors.PrintData("⏰", "Late data accepted with limited validation")
-		return true, lat, lng
-	}
-
-	colors.PrintData("⏰", "Late data accepted with limited validation")
-	return true, lat, lng
-}
-
-// processCurrentData handles current/future GPS data
-func (s *Server) processCurrentData(lat, lng float64, packet *protocol.DecodedPacket, recentData []models.GPSData) (bool, float64, float64) {
-	lastGPS := recentData[0]
-
-	// Calculate distance and time difference
-	distance := s.calculateDistance(*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
-	timeDiff := packet.Timestamp.Sub(lastGPS.Timestamp).Seconds()
-
-	// Get current speed from packet
-	currentSpeed := 0
-	if packet.Speed != nil {
-		currentSpeed = int(*packet.Speed)
-	}
-
-	colors.PrintData("✅", "GPS validation passed: distance=%.1fm, time=%.1fs, reported_speed=%d km/h",
-		distance, timeDiff, currentSpeed)
-
-	return true, lat, lng
-}
-
-// interpolatePosition calculates expected position between two GPS points at a given time
-func (s *Server) interpolatePosition(before, after *models.GPSData, targetTime time.Time) (float64, float64) {
-	totalTime := after.Timestamp.Sub(before.Timestamp).Seconds()
-	elapsedTime := targetTime.Sub(before.Timestamp).Seconds()
-
-	if totalTime <= 0 {
-		return *before.Latitude, *before.Longitude
-	}
-
-	ratio := elapsedTime / totalTime
-
-	// Linear interpolation
-	lat := *before.Latitude + (*after.Latitude-*before.Latitude)*ratio
-	lng := *before.Longitude + (*after.Longitude-*before.Longitude)*ratio
-
-	return lat, lng
-}
-
 // calculateDistance calculates the distance between two GPS points in meters
 func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
 	const earthRadius = 6371000 // Earth radius in meters
@@ -491,29 +370,6 @@ func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
 	return earthRadius * c
 }
 
-// saveStatusOnlyData saves status information without GPS coordinates
-func (s *Server) saveStatusOnlyData(packet *protocol.DecodedPacket, deviceIMEI string) {
-	// Create status data without coordinates
-	statusData := s.buildStatusData(packet, deviceIMEI)
-
-	// Clear coordinates since ignition is off
-	statusData.Latitude = nil
-	statusData.Longitude = nil
-	statusData.Speed = nil
-	statusData.Course = nil
-
-	if err := db.GetDB().Create(&statusData).Error; err != nil {
-		colors.PrintError("Error saving status-only data: %v", err)
-	} else {
-		colors.PrintSuccess("Status-only data saved for device %s (ignition off)", deviceIMEI)
-
-		// Broadcast status update without coordinates
-		if http.WSHub != nil {
-			go http.WSHub.BroadcastStatusUpdate(&statusData, "", "")
-		}
-	}
-}
-
 // handleStatusPacket processes device status packets
 func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	// Update device activity
@@ -521,6 +377,11 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 
 	colors.PrintData("📊", "Status info from %s: Ignition=%s, Voltage=%v, GSM Signal=%v",
 		conn.RemoteAddr(), packet.Ignition, packet.Voltage, packet.GSMSignal)
+
+	// Validate for duplicate status data
+	if s.isDuplicateStatusData(deviceIMEI, packet) {
+		return
+	}
 
 	// Save status data to database and broadcast to WebSocket clients
 	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
@@ -678,6 +539,51 @@ func (s *Server) buildStatusData(packet *protocol.DecodedPacket, deviceIMEI stri
 	}
 
 	return statusData
+}
+
+// isDuplicateStatusData checks if the status data is identical to the last saved status
+func (s *Server) isDuplicateStatusData(imei string, packet *protocol.DecodedPacket) bool {
+	var lastStatus models.GPSData
+	err := db.GetDB().Where("imei = ? AND protocol_name = ?", imei, packet.ProtocolName).
+		Order("timestamp DESC").
+		First(&lastStatus).Error
+
+	if err != nil {
+		// No previous status data, not a duplicate
+		return false
+	}
+
+	// Check if ALL status fields are identical
+	isDuplicate := lastStatus.Ignition == packet.Ignition &&
+		lastStatus.Charger == packet.Charger &&
+		lastStatus.GPSTracking == packet.GPSTracking &&
+		lastStatus.OilElectricity == packet.OilElectricity &&
+		lastStatus.DeviceStatus == packet.DeviceStatus &&
+		lastStatus.VoltageStatus == packet.Voltage.Status &&
+		lastStatus.GSMStatus == packet.GSMSignal.Status &&
+		lastStatus.ProtocolName == packet.ProtocolName
+
+	// Check voltage level if both exist
+	if packet.Voltage != nil && lastStatus.VoltageLevel != nil {
+		isDuplicate = isDuplicate && *lastStatus.VoltageLevel == int(packet.Voltage.Level)
+	} else if packet.Voltage != nil || lastStatus.VoltageLevel != nil {
+		// One has voltage data, the other doesn't - not duplicate
+		isDuplicate = false
+	}
+
+	// Check GSM signal level if both exist
+	if packet.GSMSignal != nil && lastStatus.GSMSignal != nil {
+		isDuplicate = isDuplicate && *lastStatus.GSMSignal == int(packet.GSMSignal.Level)
+	} else if packet.GSMSignal != nil || lastStatus.GSMSignal != nil {
+		// One has GSM data, the other doesn't - not duplicate
+		isDuplicate = false
+	}
+
+	if isDuplicate {
+		colors.PrintWarning("📊 Duplicate status data detected for device %s - ignoring", imei)
+	}
+
+	return isDuplicate
 }
 
 // monitorDeviceTimeouts checks for devices that haven't sent data in over an hour
