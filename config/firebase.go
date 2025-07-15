@@ -35,8 +35,8 @@ func GetFirebaseConfig() *FirebaseConfig {
 		ClientID:      getEnv("FIREBASE_CLIENT_ID", ""),
 		AuthURI:       getEnv("FIREBASE_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
 		TokenURI:      getEnv("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
-		AuthProvider:  getEnv("FIREBASE_AUTH_PROVIDER", "https://www.googleapis.com/oauth2/v1/certs"),
-		ClientCertURL: getEnv("FIREBASE_CLIENT_CERT_URL", "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk"),
+		AuthProvider:  getEnv("FIREBASE_AUTH_PROVIDER_X509_CERT_URL", "https://www.googleapis.com/oauth2/v1/certs"),
+		ClientCertURL: getEnv("FIREBASE_CLIENT_X509_CERT_URL", "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk"),
 	}
 }
 
@@ -70,6 +70,7 @@ func InitializeFirebase() error {
 
 		messagingClient = messaging
 		colors.PrintSuccess("Firebase initialized successfully using service account file")
+		colors.PrintInfo("Messaging client: %v", messagingClient)
 		return nil
 	}
 
@@ -77,6 +78,12 @@ func InitializeFirebase() error {
 
 	// Fallback to environment variables
 	config := GetFirebaseConfig()
+
+	colors.PrintInfo("Firebase config check:")
+	colors.PrintInfo("  ProjectID: %s", config.ProjectID)
+	colors.PrintInfo("  ClientEmail: %s", config.ClientEmail)
+	colors.PrintInfo("  PrivateKeyID: %s", config.PrivateKeyID)
+	colors.PrintInfo("  PrivateKey length: %d", len(config.PrivateKey))
 
 	if config.ProjectID == "" {
 		colors.PrintWarning("Firebase not configured, push notifications will be disabled")
@@ -108,6 +115,8 @@ func InitializeFirebase() error {
 		return nil // Don't return error, just disable Firebase
 	}
 
+	colors.PrintInfo("Firebase credentials JSON created successfully")
+
 	// Initialize Firebase app
 	opt := option.WithCredentialsJSON(credentialsJSON)
 	app, err := firebase.NewApp(context.Background(), &firebase.Config{
@@ -121,6 +130,7 @@ func InitializeFirebase() error {
 	}
 
 	firebaseApp = app
+	colors.PrintInfo("Firebase app created successfully")
 
 	// Initialize messaging client
 	messaging, err := app.Messaging(context.Background())
@@ -132,6 +142,7 @@ func InitializeFirebase() error {
 
 	messagingClient = messaging
 	colors.PrintSuccess("Firebase initialized successfully using environment variables")
+	colors.PrintInfo("Messaging client: %v", messagingClient)
 	return nil
 }
 
