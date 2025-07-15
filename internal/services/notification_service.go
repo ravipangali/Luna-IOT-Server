@@ -58,10 +58,10 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 	colors.PrintInfo("=========================================")
 
 	if !config.IsFirebaseEnabled() {
-		log.Printf("Firebase not configured, returning success for user notification: %s", notification.Title)
+		log.Printf("Firebase not configured, returning failure for user notification: %s", notification.Title)
 		return &NotificationServiceResponse{
-			Success: true,
-			Message: "Firebase not configured - notification would be sent if Firebase was enabled",
+			Success: false,
+			Message: "Firebase not configured - notifications are disabled",
 		}, nil
 	}
 
@@ -79,8 +79,8 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 	if user.FCMToken == "" {
 		log.Printf("User %d has no FCM token", userID)
 		return &NotificationServiceResponse{
-			Success: true,
-			Message: "User has no FCM token - notification would be sent if user had FCM token",
+			Success: false,
+			Message: "User has no FCM token - user needs to register for notifications",
 		}, nil
 	}
 
@@ -101,10 +101,10 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	colors.PrintInfo("===========================")
 
 	if !config.IsFirebaseEnabled() {
-		colors.PrintWarning("Firebase not configured, returning success for notification: %s", notification.Title)
+		colors.PrintWarning("Firebase not configured, returning failure for notification: %s", notification.Title)
 		return &NotificationServiceResponse{
-			Success: true,
-			Message: "Firebase not configured - notification would be sent if Firebase was enabled",
+			Success: false,
+			Message: "Firebase not configured - notifications are disabled",
 		}, nil
 	}
 
@@ -136,8 +136,8 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	if len(tokens) == 0 {
 		colors.PrintWarning("No valid FCM tokens found for users: %v", userIDs)
 		return &NotificationServiceResponse{
-			Success: true,
-			Message: "No valid FCM tokens found - notification would be sent if users had FCM tokens",
+			Success: false,
+			Message: "No valid FCM tokens found - users need to register for notifications",
 		}, nil
 	}
 
@@ -147,10 +147,11 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	response, err := ns.sendToMultipleTokens(tokens, notification)
 	if err != nil {
 		colors.PrintError("Firebase notification failed: %v", err)
-		// Return success anyway to prevent frontend errors
+		// Return failure when Firebase is not properly configured
 		return &NotificationServiceResponse{
-			Success: true,
-			Message: "Notification would be sent if Firebase was properly configured",
+			Success: false,
+			Message: "Failed to send notification - Firebase not properly configured",
+			Error:   err.Error(),
 		}, nil
 	}
 
@@ -160,10 +161,10 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 // SendToTopic sends notification to a topic
 func (ns *NotificationService) SendToTopic(topic string, notification *NotificationData) (*NotificationServiceResponse, error) {
 	if !config.IsFirebaseEnabled() {
-		log.Printf("Firebase not configured, returning success for topic notification: %s", notification.Title)
+		log.Printf("Firebase not configured, returning failure for topic notification: %s", notification.Title)
 		return &NotificationServiceResponse{
-			Success: true,
-			Message: "Firebase not configured - notification would be sent if Firebase was enabled",
+			Success: false,
+			Message: "Firebase not configured - notifications are disabled",
 		}, nil
 	}
 

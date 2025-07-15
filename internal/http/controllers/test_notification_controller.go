@@ -165,17 +165,23 @@ func (tnc *TestNotificationController) SendTestTopicNotification(c *gin.Context)
 func (tnc *TestNotificationController) NotificationHealthCheck(c *gin.Context) {
 	firebaseEnabled := config.IsFirebaseEnabled()
 
+	status := "healthy"
+	if !firebaseEnabled {
+		status = "disabled"
+	}
+
 	healthStatus := gin.H{
-		"success": true,
+		"success": firebaseEnabled,
 		"message": "Notification system health check",
 		"data": gin.H{
 			"firebase_enabled": firebaseEnabled,
-			"status":           "healthy",
+			"status":           status,
 		},
 	}
 
 	if !firebaseEnabled {
-		healthStatus["data"].(gin.H)["warning"] = "Firebase not configured - notifications will be simulated"
+		healthStatus["data"].(gin.H)["warning"] = "Firebase not configured - notifications are disabled"
+		healthStatus["message"] = "Notification system is disabled - Firebase not configured"
 	}
 
 	colors.PrintInfo("Notification health check: Firebase enabled = %v", firebaseEnabled)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/internal/tcp"
@@ -26,6 +27,14 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
+
+	// Initialize Firebase
+	if err := config.InitializeFirebase(); err != nil {
+		colors.PrintWarning("Firebase initialization failed: %v", err)
+		colors.PrintWarning("Push notifications will be disabled")
+	} else {
+		colors.PrintSuccess("Firebase initialized successfully")
+	}
 
 	// Initialize global control controller
 	controlController = controllers.NewControlController()

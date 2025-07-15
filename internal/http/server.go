@@ -1,6 +1,7 @@
 package http
 
 import (
+	"luna_iot_server/config"
 	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/pkg/colors"
 	"os"
@@ -18,6 +19,14 @@ type Server struct {
 func NewServer(port string) *Server {
 	// Set Gin to release mode to reduce debug output
 	gin.SetMode(gin.ReleaseMode)
+
+	// Initialize Firebase
+	if err := config.InitializeFirebase(); err != nil {
+		colors.PrintWarning("Firebase initialization failed: %v", err)
+		colors.PrintWarning("Push notifications will be disabled")
+	} else {
+		colors.PrintSuccess("Firebase initialized successfully")
+	}
 
 	// Create Gin router
 	router := gin.Default()
