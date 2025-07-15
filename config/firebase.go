@@ -45,7 +45,7 @@ func GetFirebaseConfig() *FirebaseConfig {
 }
 
 func InitializeFirebase() error {
-	colors.PrintInfo("Starting Firebase initialization...")
+	colors.PrintInfo("Starting Firebase initialization with OAuth2 authentication...")
 
 	// Try to read from service account file first
 	serviceAccountPath := "firebase-service-account.json"
@@ -53,7 +53,7 @@ func InitializeFirebase() error {
 	// Check if service account file exists
 	if _, err := os.Stat(serviceAccountPath); err == nil {
 		colors.PrintInfo("Found Firebase service account file, using it for initialization")
-		// Use service account file
+		// Use service account file with OAuth2
 		opt := option.WithCredentialsFile(serviceAccountPath)
 		app, err := firebase.NewApp(context.Background(), nil, opt)
 		if err != nil {
@@ -79,23 +79,20 @@ func InitializeFirebase() error {
 
 		messagingClient = messaging
 		firebaseInitialized = true
-		colors.PrintSuccess("Firebase initialized successfully using service account file")
+		colors.PrintSuccess("Firebase initialized successfully using service account file with OAuth2")
 		colors.PrintInfo("Messaging client: %v", messagingClient)
 		return nil
 	}
 
-	colors.PrintInfo("No Firebase service account file found, trying environment variables")
+	colors.PrintInfo("No Firebase service account file found, using hardcoded credentials with OAuth2")
 
-	// Fallback to environment variables
+	// Fallback to hardcoded credentials with OAuth2
 	config := GetFirebaseConfig()
 
 	colors.PrintInfo("Firebase config check:")
 	colors.PrintInfo("  ProjectID: %s", config.ProjectID)
 	colors.PrintInfo("  ClientEmail: %s", config.ClientEmail)
 	colors.PrintInfo("  PrivateKeyID: %s", config.PrivateKeyID)
-	colors.PrintInfo("  PrivateKey length: %d", len(config.PrivateKey))
-	colors.PrintInfo("  PrivateKey starts with: %s", config.PrivateKey[:50])
-	colors.PrintInfo("  PrivateKey ends with: %s", config.PrivateKey[len(config.PrivateKey)-50:])
 
 	if config.ProjectID == "" {
 		colors.PrintWarning("Firebase not configured, push notifications will be disabled")
@@ -106,7 +103,7 @@ func InitializeFirebase() error {
 	colors.PrintInfo("Firebase config found: ProjectID=%s, ClientEmail=%s",
 		config.ProjectID, config.ClientEmail)
 
-	// Create Firebase credentials
+	// Create Firebase credentials with proper OAuth2 setup
 	credentials := map[string]interface{}{
 		"type":                        "service_account",
 		"project_id":                  config.ProjectID,
@@ -120,7 +117,7 @@ func InitializeFirebase() error {
 		"client_x509_cert_url":        config.ClientCertURL,
 	}
 
-	colors.PrintInfo("Created credentials object with all required fields")
+	colors.PrintInfo("Created OAuth2 credentials object with all required fields")
 
 	// Convert credentials to JSON bytes
 	credentialsJSON, err := json.Marshal(credentials)
@@ -131,23 +128,23 @@ func InitializeFirebase() error {
 		return nil // Don't return error, just disable Firebase
 	}
 
-	colors.PrintInfo("Firebase credentials JSON created successfully, length: %d", len(credentialsJSON))
+	colors.PrintInfo("Firebase OAuth2 credentials JSON created successfully, length: %d", len(credentialsJSON))
 
-	// Initialize Firebase app
+	// Initialize Firebase app with OAuth2
 	opt := option.WithCredentialsJSON(credentialsJSON)
 	app, err := firebase.NewApp(context.Background(), &firebase.Config{
 		ProjectID: config.ProjectID,
 	}, opt)
 
 	if err != nil {
-		colors.PrintError("Failed to create Firebase app: %v", err)
+		colors.PrintError("Failed to create Firebase app with OAuth2: %v", err)
 		colors.PrintWarning("Firebase app creation failed, push notifications will be disabled")
 		firebaseInitialized = false
 		return nil // Don't return error, just disable Firebase
 	}
 
 	firebaseApp = app
-	colors.PrintInfo("Firebase app created successfully")
+	colors.PrintInfo("Firebase app created successfully with OAuth2")
 
 	// Initialize messaging client with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -163,7 +160,7 @@ func InitializeFirebase() error {
 
 	messagingClient = messaging
 	firebaseInitialized = true
-	colors.PrintSuccess("Firebase initialized successfully using environment variables")
+	colors.PrintSuccess("Firebase initialized successfully using OAuth2 authentication")
 	colors.PrintInfo("Messaging client: %v", messagingClient)
 	colors.PrintInfo("Messaging client is nil: %v", messagingClient == nil)
 	return nil
