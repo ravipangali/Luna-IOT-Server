@@ -3,7 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"luna_iot_server/pkg/colors"
 	"os"
 
 	firebase "firebase.google.com/go/v4"
@@ -41,16 +41,19 @@ func GetFirebaseConfig() *FirebaseConfig {
 }
 
 func InitializeFirebase() error {
+	colors.PrintInfo("Starting Firebase initialization...")
+
 	// Try to read from service account file first
 	serviceAccountPath := "firebase-service-account.json"
 
 	// Check if service account file exists
 	if _, err := os.Stat(serviceAccountPath); err == nil {
+		colors.PrintInfo("Found Firebase service account file, using it for initialization")
 		// Use service account file
 		opt := option.WithCredentialsFile(serviceAccountPath)
 		app, err := firebase.NewApp(context.Background(), nil, opt)
 		if err != nil {
-			log.Printf("Failed to initialize Firebase with service account file: %v", err)
+			colors.PrintError("Failed to initialize Firebase with service account file: %v", err)
 			return err
 		}
 
@@ -59,21 +62,27 @@ func InitializeFirebase() error {
 		// Initialize messaging client
 		messaging, err := app.Messaging(context.Background())
 		if err != nil {
+			colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
 			return err
 		}
 
 		messagingClient = messaging
-		log.Println("Firebase initialized successfully using service account file")
+		colors.PrintSuccess("Firebase initialized successfully using service account file")
 		return nil
 	}
+
+	colors.PrintInfo("No Firebase service account file found, trying environment variables")
 
 	// Fallback to environment variables
 	config := GetFirebaseConfig()
 
 	if config.ProjectID == "" {
-		log.Println("Firebase not configured, push notifications will be disabled")
+		colors.PrintWarning("Firebase not configured, push notifications will be disabled")
 		return nil
 	}
+
+	colors.PrintInfo("Firebase config found: ProjectID=%s, ClientEmail=%s",
+		config.ProjectID, config.ClientEmail)
 
 	// Create Firebase credentials
 	credentials := map[string]interface{}{
@@ -92,6 +101,7 @@ func InitializeFirebase() error {
 	// Convert credentials to JSON bytes
 	credentialsJSON, err := json.Marshal(credentials)
 	if err != nil {
+		colors.PrintError("Failed to marshal Firebase credentials: %v", err)
 		return err
 	}
 
@@ -102,6 +112,7 @@ func InitializeFirebase() error {
 	}, opt)
 
 	if err != nil {
+		colors.PrintError("Failed to create Firebase app: %v", err)
 		return err
 	}
 
@@ -110,11 +121,12 @@ func InitializeFirebase() error {
 	// Initialize messaging client
 	messaging, err := app.Messaging(context.Background())
 	if err != nil {
+		colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
 		return err
 	}
 
 	messagingClient = messaging
-	log.Println("Firebase initialized successfully using environment variables")
+	colors.PrintSuccess("Firebase initialized successfully using environment variables")
 	return nil
 }
 
@@ -123,5 +135,7 @@ func GetMessagingClient() *messaging.Client {
 }
 
 func IsFirebaseEnabled() bool {
-	return messagingClient != nil
+	enabled := messagingClient != nil
+	colors.PrintInfo("Firebase enabled check: %t", enabled)
+	return enabled
 }

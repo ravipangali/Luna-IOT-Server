@@ -368,13 +368,19 @@ func (nds *NotificationDBService) MarkNotificationAsSent(notificationID uint) er
 func (nds *NotificationDBService) GetNotificationByID(notificationID uint) (*models.Notification, error) {
 	database := db.GetDB()
 
+	colors.PrintInfo("Attempting to fetch notification with ID: %d", notificationID)
+
 	var notification models.Notification
 	if err := database.
 		Preload("Creator").
 		Preload("Users").
 		First(&notification, notificationID).Error; err != nil {
+		colors.PrintError("Database error fetching notification %d: %v", notificationID, err)
 		return nil, err
 	}
+
+	colors.PrintInfo("Successfully fetched notification %d: Title='%s', Users count=%d",
+		notificationID, notification.Title, len(notification.Users))
 
 	return &notification, nil
 }

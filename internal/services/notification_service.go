@@ -9,6 +9,7 @@ import (
 	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
+	"luna_iot_server/pkg/colors"
 
 	"firebase.google.com/go/v4/messaging"
 )
@@ -74,40 +75,52 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 
 // SendToMultipleUsers sends notification to multiple users
 func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification *NotificationData) (*NotificationServiceResponse, error) {
+	colors.PrintInfo("SendToMultipleUsers called with %d user IDs: %v", len(userIDs), userIDs)
+	colors.PrintInfo("Notification data: Title='%s', Body='%s', Type='%s'",
+		notification.Title, notification.Body, notification.Type)
+
 	if !config.IsFirebaseEnabled() {
-		log.Printf("Firebase not configured, returning success for notification: %s", notification.Title)
+		colors.PrintWarning("Firebase not configured, returning success for notification: %s", notification.Title)
 		return &NotificationServiceResponse{
 			Success: true,
 			Message: "Firebase not configured - notification would be sent if Firebase was enabled",
 		}, nil
 	}
 
+	colors.PrintInfo("Firebase is enabled, proceeding with notification send")
+
 	// Get users' FCM tokens from database
 	var users []models.User
 	database := db.GetDB()
 	if err := database.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
-		log.Printf("Failed to fetch users for notification: %v", err)
+		colors.PrintError("Failed to fetch users for notification: %v", err)
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to fetch users",
 		}, err
 	}
 
+	colors.PrintInfo("Found %d users in database", len(users))
+
 	var tokens []string
 	for _, user := range users {
 		if user.FCMToken != "" {
 			tokens = append(tokens, user.FCMToken)
+			colors.PrintInfo("User %d has FCM token: %s", user.ID, user.FCMToken[:20]+"...")
+		} else {
+			colors.PrintInfo("User %d has no FCM token", user.ID)
 		}
 	}
 
 	if len(tokens) == 0 {
-		log.Printf("No valid FCM tokens found for users: %v", userIDs)
+		colors.PrintWarning("No valid FCM tokens found for users: %v", userIDs)
 		return &NotificationServiceResponse{
 			Success: true,
 			Message: "No valid FCM tokens found - notification would be sent if users had FCM tokens",
 		}, nil
 	}
 
+	colors.PrintInfo("Sending notification to %d FCM tokens", len(tokens))
 	return ns.sendToMultipleTokens(tokens, notification)
 }
 
