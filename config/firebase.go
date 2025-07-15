@@ -53,9 +53,41 @@ func InitializeFirebase() error {
 	// Check if service account file exists
 	if _, err := os.Stat(serviceAccountPath); err == nil {
 		colors.PrintInfo("Found Firebase service account file, using it for initialization")
+
+		// Read and validate the service account file
+		fileBytes, err := os.ReadFile(serviceAccountPath)
+		if err != nil {
+			colors.PrintError("Failed to read service account file: %v", err)
+			colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+			firebaseInitialized = false
+			return nil
+		}
+
+		// Parse the JSON to validate it
+		var serviceAccount map[string]interface{}
+		if err := json.Unmarshal(fileBytes, &serviceAccount); err != nil {
+			colors.PrintError("Failed to parse service account JSON: %v", err)
+			colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+			firebaseInitialized = false
+			return nil
+		}
+
+		// Validate required fields
+		projectID, ok := serviceAccount["project_id"].(string)
+		if !ok || projectID == "" {
+			colors.PrintError("Invalid project_id in service account file")
+			colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+			firebaseInitialized = false
+			return nil
+		}
+
+		colors.PrintInfo("Service account file validation passed. Project ID: %s", projectID)
+
 		// Use service account file with OAuth2
 		opt := option.WithCredentialsFile(serviceAccountPath)
-		app, err := firebase.NewApp(context.Background(), nil, opt)
+		app, err := firebase.NewApp(context.Background(), &firebase.Config{
+			ProjectID: projectID,
+		}, opt)
 		if err != nil {
 			colors.PrintError("Failed to initialize Firebase with service account file: %v", err)
 			colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
@@ -84,85 +116,9 @@ func InitializeFirebase() error {
 		return nil
 	}
 
-	colors.PrintInfo("No Firebase service account file found, using hardcoded credentials with OAuth2")
-
-	// Fallback to hardcoded credentials with OAuth2
-	config := GetFirebaseConfig()
-
-	colors.PrintInfo("Firebase config check:")
-	colors.PrintInfo("  ProjectID: %s", config.ProjectID)
-	colors.PrintInfo("  ClientEmail: %s", config.ClientEmail)
-	colors.PrintInfo("  PrivateKeyID: %s", config.PrivateKeyID)
-
-	if config.ProjectID == "" {
-		colors.PrintWarning("Firebase not configured, push notifications will be disabled")
-		firebaseInitialized = false
-		return nil
-	}
-
-	colors.PrintInfo("Firebase config found: ProjectID=%s, ClientEmail=%s",
-		config.ProjectID, config.ClientEmail)
-
-	// Create Firebase credentials with proper OAuth2 setup
-	credentials := map[string]interface{}{
-		"type":                        "service_account",
-		"project_id":                  config.ProjectID,
-		"private_key_id":              config.PrivateKeyID,
-		"private_key":                 config.PrivateKey,
-		"client_email":                config.ClientEmail,
-		"client_id":                   config.ClientID,
-		"auth_uri":                    config.AuthURI,
-		"token_uri":                   config.TokenURI,
-		"auth_provider_x509_cert_url": config.AuthProvider,
-		"client_x509_cert_url":        config.ClientCertURL,
-	}
-
-	colors.PrintInfo("Created OAuth2 credentials object with all required fields")
-
-	// Convert credentials to JSON bytes
-	credentialsJSON, err := json.Marshal(credentials)
-	if err != nil {
-		colors.PrintError("Failed to marshal Firebase credentials: %v", err)
-		colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
-		firebaseInitialized = false
-		return nil // Don't return error, just disable Firebase
-	}
-
-	colors.PrintInfo("Firebase OAuth2 credentials JSON created successfully, length: %d", len(credentialsJSON))
-
-	// Initialize Firebase app with OAuth2
-	opt := option.WithCredentialsJSON(credentialsJSON)
-	app, err := firebase.NewApp(context.Background(), &firebase.Config{
-		ProjectID: config.ProjectID,
-	}, opt)
-
-	if err != nil {
-		colors.PrintError("Failed to create Firebase app with OAuth2: %v", err)
-		colors.PrintWarning("Firebase app creation failed, push notifications will be disabled")
-		firebaseInitialized = false
-		return nil // Don't return error, just disable Firebase
-	}
-
-	firebaseApp = app
-	colors.PrintInfo("Firebase app created successfully with OAuth2")
-
-	// Initialize messaging client with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	messaging, err := app.Messaging(ctx)
-	if err != nil {
-		colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
-		colors.PrintWarning("Firebase messaging client failed, push notifications will be disabled")
-		firebaseInitialized = false
-		return nil // Don't return error, just disable Firebase
-	}
-
-	messagingClient = messaging
-	firebaseInitialized = true
-	colors.PrintSuccess("Firebase initialized successfully using OAuth2 authentication")
-	colors.PrintInfo("Messaging client: %v", messagingClient)
-	colors.PrintInfo("Messaging client is nil: %v", messagingClient == nil)
+	colors.PrintError("Firebase service account file not found: %s", serviceAccountPath)
+	colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+	firebaseInitialized = false
 	return nil
 }
 
