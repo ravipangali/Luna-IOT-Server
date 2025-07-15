@@ -15,7 +15,7 @@ import (
 )
 
 type NotificationService struct {
-	messagingClient *messaging.Client
+	// Remove the messagingClient field since we'll get it dynamically
 }
 
 type NotificationData struct {
@@ -36,13 +36,27 @@ type NotificationServiceResponse struct {
 }
 
 func NewNotificationService() *NotificationService {
-	return &NotificationService{
-		messagingClient: config.GetMessagingClient(),
+	return &NotificationService{}
+}
+
+// getMessagingClient gets the messaging client dynamically
+func (ns *NotificationService) getMessagingClient() *messaging.Client {
+	client := config.GetMessagingClient()
+	if client == nil {
+		colors.PrintError("Firebase messaging client is nil - Firebase may not be properly initialized")
 	}
+	return client
 }
 
 // SendToUser sends notification to a specific user
 func (ns *NotificationService) SendToUser(userID uint, notification *NotificationData) (*NotificationServiceResponse, error) {
+	// Add detailed Firebase debugging
+	colors.PrintInfo("=== FIREBASE DEBUG INFO (SendToUser) ===")
+	colors.PrintInfo("IsFirebaseEnabled(): %v", config.IsFirebaseEnabled())
+	colors.PrintInfo("GetMessagingClient(): %v", config.GetMessagingClient())
+	colors.PrintInfo("NotificationService messagingClient: %v", ns.getMessagingClient())
+	colors.PrintInfo("=========================================")
+
 	if !config.IsFirebaseEnabled() {
 		log.Printf("Firebase not configured, returning success for user notification: %s", notification.Title)
 		return &NotificationServiceResponse{
@@ -78,6 +92,13 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	colors.PrintInfo("SendToMultipleUsers called with %d user IDs: %v", len(userIDs), userIDs)
 	colors.PrintInfo("Notification data: Title='%s', Body='%s', Type='%s'",
 		notification.Title, notification.Body, notification.Type)
+
+	// Add detailed Firebase debugging
+	colors.PrintInfo("=== FIREBASE DEBUG INFO ===")
+	colors.PrintInfo("IsFirebaseEnabled(): %v", config.IsFirebaseEnabled())
+	colors.PrintInfo("GetMessagingClient(): %v", config.GetMessagingClient())
+	colors.PrintInfo("NotificationService messagingClient: %v", ns.getMessagingClient())
+	colors.PrintInfo("===========================")
 
 	if !config.IsFirebaseEnabled() {
 		colors.PrintWarning("Firebase not configured, returning success for notification: %s", notification.Title)
@@ -146,6 +167,16 @@ func (ns *NotificationService) SendToTopic(topic string, notification *Notificat
 		}, nil
 	}
 
+	client := ns.getMessagingClient()
+	if client == nil {
+		colors.PrintError("Cannot send topic notification - Firebase messaging client is nil")
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "Firebase messaging client not available",
+			Error:   "Firebase not properly initialized",
+		}, fmt.Errorf("Firebase messaging client is nil")
+	}
+
 	message := &messaging.Message{
 		Topic: topic,
 		Notification: &messaging.Notification{
@@ -170,7 +201,7 @@ func (ns *NotificationService) SendToTopic(topic string, notification *Notificat
 		},
 	}
 
-	response, err := ns.messagingClient.Send(context.Background(), message)
+	response, err := client.Send(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send notification to topic %s: %v", topic, err)
 		return &NotificationServiceResponse{
@@ -188,6 +219,16 @@ func (ns *NotificationService) SendToTopic(topic string, notification *Notificat
 
 // SendToToken sends notification to a specific FCM token
 func (ns *NotificationService) sendToToken(token string, notification *NotificationData) (*NotificationServiceResponse, error) {
+	client := ns.getMessagingClient()
+	if client == nil {
+		colors.PrintError("Cannot send notification - Firebase messaging client is nil")
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "Firebase messaging client not available",
+			Error:   "Firebase not properly initialized",
+		}, fmt.Errorf("Firebase messaging client is nil")
+	}
+
 	message := &messaging.Message{
 		Token: token,
 		Notification: &messaging.Notification{
@@ -212,7 +253,7 @@ func (ns *NotificationService) sendToToken(token string, notification *Notificat
 		},
 	}
 
-	response, err := ns.messagingClient.Send(context.Background(), message)
+	response, err := client.Send(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send notification to token %s: %v", token, err)
 		return &NotificationServiceResponse{
@@ -230,6 +271,16 @@ func (ns *NotificationService) sendToToken(token string, notification *Notificat
 
 // SendToMultipleTokens sends notification to multiple FCM tokens
 func (ns *NotificationService) sendToMultipleTokens(tokens []string, notification *NotificationData) (*NotificationServiceResponse, error) {
+	client := ns.getMessagingClient()
+	if client == nil {
+		colors.PrintError("Cannot send multicast notification - Firebase messaging client is nil")
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "Firebase messaging client not available",
+			Error:   "Firebase not properly initialized",
+		}, fmt.Errorf("Firebase messaging client is nil")
+	}
+
 	message := &messaging.MulticastMessage{
 		Tokens: tokens,
 		Notification: &messaging.Notification{
@@ -254,7 +305,7 @@ func (ns *NotificationService) sendToMultipleTokens(tokens []string, notificatio
 		},
 	}
 
-	response, err := ns.messagingClient.SendMulticast(context.Background(), message)
+	response, err := client.SendMulticast(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send multicast notification: %v", err)
 		return &NotificationServiceResponse{
@@ -311,6 +362,11 @@ func (ns *NotificationService) SubscribeToTopic(userID uint, topic string) error
 		return fmt.Errorf("Firebase not configured")
 	}
 
+	client := ns.getMessagingClient()
+	if client == nil {
+		return fmt.Errorf("Firebase messaging client not available")
+	}
+
 	var user models.User
 	database := db.GetDB()
 	if err := database.First(&user, userID).Error; err != nil {
@@ -321,7 +377,7 @@ func (ns *NotificationService) SubscribeToTopic(userID uint, topic string) error
 		return fmt.Errorf("User has no FCM token")
 	}
 
-	_, err := ns.messagingClient.SubscribeToTopic(context.Background(), []string{user.FCMToken}, topic)
+	_, err := client.SubscribeToTopic(context.Background(), []string{user.FCMToken}, topic)
 	return err
 }
 
@@ -331,6 +387,11 @@ func (ns *NotificationService) UnsubscribeFromTopic(userID uint, topic string) e
 		return fmt.Errorf("Firebase not configured")
 	}
 
+	client := ns.getMessagingClient()
+	if client == nil {
+		return fmt.Errorf("Firebase messaging client not available")
+	}
+
 	var user models.User
 	database := db.GetDB()
 	if err := database.First(&user, userID).Error; err != nil {
@@ -341,6 +402,6 @@ func (ns *NotificationService) UnsubscribeFromTopic(userID uint, topic string) e
 		return fmt.Errorf("User has no FCM token")
 	}
 
-	_, err := ns.messagingClient.UnsubscribeFromTopic(context.Background(), []string{user.FCMToken}, topic)
+	_, err := client.UnsubscribeFromTopic(context.Background(), []string{user.FCMToken}, topic)
 	return err
 }
