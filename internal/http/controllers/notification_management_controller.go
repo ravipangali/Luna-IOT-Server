@@ -369,15 +369,21 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 
 	// Get user IDs for this notification
 	colors.PrintInfo("Fetching user IDs for notification %d", id)
-	var userIDs []uint
-	if err := db.GetDB().Model(&notification).Association("Users").Find(&userIDs); err != nil {
-		colors.PrintError("Failed to get user IDs for notification %d: %v", id, err)
+	var users []models.User
+	if err := db.GetDB().Model(&notification).Association("Users").Find(&users); err != nil {
+		colors.PrintError("Failed to get users for notification %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to get notification users",
 			"message": err.Error(),
 		})
 		return
+	}
+
+	// Extract user IDs from the users slice
+	var userIDs []uint
+	for _, user := range users {
+		userIDs = append(userIDs, user.ID)
 	}
 
 	colors.PrintInfo("Found %d users for notification %d: %v", len(userIDs), id, userIDs)
