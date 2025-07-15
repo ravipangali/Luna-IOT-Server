@@ -59,7 +59,7 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 	colors.PrintInfo("=========================================")
 
 	if !config.IsFirebaseEnabled() {
-		log.Printf("Firebase not configured, returning failure for user notification: %s", notification.Title)
+		colors.PrintError("Firebase not configured, cannot send notification to user %d: %s", userID, notification.Title)
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Firebase not configured - notifications are disabled",
@@ -112,7 +112,7 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	colors.PrintInfo("===========================")
 
 	if !config.IsFirebaseEnabled() {
-		colors.PrintWarning("Firebase not configured, returning failure for notification: %s", notification.Title)
+		colors.PrintError("Firebase not configured, cannot send notification to %d users: %s", len(userIDs), notification.Title)
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Firebase not configured - notifications are disabled",
@@ -178,10 +178,10 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 			}, nil
 		}
 
-		// Return failure when Firebase is not properly configured
+		// Return failure for other Firebase errors
 		return &NotificationServiceResponse{
 			Success: false,
-			Message: "Failed to send notification - Firebase not properly configured",
+			Message: "Failed to send notification - Firebase error",
 			Error:   err.Error(),
 		}, nil
 	}
