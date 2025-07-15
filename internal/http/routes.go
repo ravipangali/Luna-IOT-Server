@@ -28,7 +28,6 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	rechargeController := controllers.NewRechargeController()
 	popupController := controllers.NewPopupController()
 	notificationController := controllers.NewNotificationController()
-	testNotificationController := controllers.NewTestNotificationController()
 	notificationManagementController := controllers.NewNotificationManagementController()
 	userSearchController := controllers.NewUserSearchController()
 
@@ -356,9 +355,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		testNotifications := v1.Group("/test/notifications")
 		testNotifications.Use(middleware.AuthMiddleware())
 		{
-			testNotifications.GET("/health", testNotificationController.NotificationHealthCheck)
-			testNotifications.POST("/send", testNotificationController.SendTestNotification)
-			testNotifications.POST("/send-to-topic/:topic", testNotificationController.SendTestTopicNotification)
+			testNotifications.GET("/firebase-test", notificationController.TestFirebaseConnection)
 		}
 	}
 

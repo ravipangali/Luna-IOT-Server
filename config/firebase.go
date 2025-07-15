@@ -3,8 +3,11 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"luna_iot_server/pkg/colors"
 	"os"
+	"strings"
+	"time"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
@@ -25,6 +28,7 @@ type FirebaseConfig struct {
 
 var firebaseApp *firebase.App
 var messagingClient *messaging.Client
+var firebaseInitialized bool
 
 func GetFirebaseConfig() *FirebaseConfig {
 	return &FirebaseConfig{
@@ -55,20 +59,26 @@ func InitializeFirebase() error {
 		if err != nil {
 			colors.PrintError("Failed to initialize Firebase with service account file: %v", err)
 			colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+			firebaseInitialized = false
 			return nil // Don't return error, just disable Firebase
 		}
 
 		firebaseApp = app
 
-		// Initialize messaging client
-		messaging, err := app.Messaging(context.Background())
+		// Initialize messaging client with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		messaging, err := app.Messaging(ctx)
 		if err != nil {
 			colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
 			colors.PrintWarning("Firebase messaging client failed, push notifications will be disabled")
+			firebaseInitialized = false
 			return nil // Don't return error, just disable Firebase
 		}
 
 		messagingClient = messaging
+		firebaseInitialized = true
 		colors.PrintSuccess("Firebase initialized successfully using service account file")
 		colors.PrintInfo("Messaging client: %v", messagingClient)
 		return nil
@@ -89,6 +99,7 @@ func InitializeFirebase() error {
 
 	if config.ProjectID == "" {
 		colors.PrintWarning("Firebase not configured, push notifications will be disabled")
+		firebaseInitialized = false
 		return nil
 	}
 
@@ -116,6 +127,7 @@ func InitializeFirebase() error {
 	if err != nil {
 		colors.PrintError("Failed to marshal Firebase credentials: %v", err)
 		colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+		firebaseInitialized = false
 		return nil // Don't return error, just disable Firebase
 	}
 
@@ -130,21 +142,27 @@ func InitializeFirebase() error {
 	if err != nil {
 		colors.PrintError("Failed to create Firebase app: %v", err)
 		colors.PrintWarning("Firebase app creation failed, push notifications will be disabled")
+		firebaseInitialized = false
 		return nil // Don't return error, just disable Firebase
 	}
 
 	firebaseApp = app
 	colors.PrintInfo("Firebase app created successfully")
 
-	// Initialize messaging client
-	messaging, err := app.Messaging(context.Background())
+	// Initialize messaging client with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	messaging, err := app.Messaging(ctx)
 	if err != nil {
 		colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
 		colors.PrintWarning("Firebase messaging client failed, push notifications will be disabled")
+		firebaseInitialized = false
 		return nil // Don't return error, just disable Firebase
 	}
 
 	messagingClient = messaging
+	firebaseInitialized = true
 	colors.PrintSuccess("Firebase initialized successfully using environment variables")
 	colors.PrintInfo("Messaging client: %v", messagingClient)
 	colors.PrintInfo("Messaging client is nil: %v", messagingClient == nil)
@@ -156,7 +174,46 @@ func GetMessagingClient() *messaging.Client {
 }
 
 func IsFirebaseEnabled() bool {
-	enabled := messagingClient != nil
-	colors.PrintInfo("Firebase enabled check: %t", enabled)
+	enabled := messagingClient != nil && firebaseInitialized
+	colors.PrintInfo("Firebase enabled check: %t (client: %v, initialized: %v)", enabled, messagingClient != nil, firebaseInitialized)
 	return enabled
+}
+
+// TestFirebaseConnection tests if Firebase is properly configured and accessible
+func TestFirebaseConnection() error {
+	if !IsFirebaseEnabled() {
+		return fmt.Errorf("Firebase is not enabled")
+	}
+
+	client := GetMessagingClient()
+	if client == nil {
+		return fmt.Errorf("Firebase messaging client is nil")
+	}
+
+	// Try to send a test message to a non-existent token to test the connection
+	// This will fail but will tell us if the Firebase configuration is valid
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	message := &messaging.Message{
+		Token: "test-token-that-does-not-exist",
+		Notification: &messaging.Notification{
+			Title: "Test",
+			Body:  "Test",
+		},
+	}
+
+	_, err := client.Send(ctx, message)
+	if err != nil {
+		// Check if it's a 404 error (invalid project/credentials) or other error
+		if strings.Contains(err.Error(), "404") {
+			colors.PrintError("Firebase configuration error: Invalid project or credentials")
+			return fmt.Errorf("Firebase configuration error: Invalid project or credentials - %v", err)
+		}
+		// Other errors (like invalid token) are expected and indicate Firebase is working
+		colors.PrintSuccess("Firebase connection test passed (expected error for invalid token)")
+		return nil
+	}
+
+	return nil
 }

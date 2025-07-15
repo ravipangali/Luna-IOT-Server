@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
@@ -65,6 +66,16 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 		}, nil
 	}
 
+	// Test Firebase connection before proceeding
+	if err := config.TestFirebaseConnection(); err != nil {
+		colors.PrintError("Firebase connection test failed: %v", err)
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "Firebase configuration error - " + err.Error(),
+			Error:   err.Error(),
+		}, nil
+	}
+
 	// Get user's FCM token from database
 	var user models.User
 	database := db.GetDB()
@@ -108,7 +119,17 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 		}, nil
 	}
 
-	colors.PrintInfo("Firebase is enabled, proceeding with notification send")
+	// Test Firebase connection before proceeding
+	if err := config.TestFirebaseConnection(); err != nil {
+		colors.PrintError("Firebase connection test failed: %v", err)
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "Firebase configuration error - " + err.Error(),
+			Error:   err.Error(),
+		}, nil
+	}
+
+	colors.PrintInfo("Firebase is enabled and connection test passed, proceeding with notification send")
 
 	// Get users' FCM tokens from database
 	var users []models.User
@@ -147,6 +168,16 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	response, err := ns.sendToMultipleTokens(tokens, notification)
 	if err != nil {
 		colors.PrintError("Firebase notification failed: %v", err)
+
+		// Check if it's a 404 error (configuration issue)
+		if strings.Contains(err.Error(), "404") {
+			return &NotificationServiceResponse{
+				Success: false,
+				Message: "Firebase configuration error - Invalid project or credentials",
+				Error:   err.Error(),
+			}, nil
+		}
+
 		// Return failure when Firebase is not properly configured
 		return &NotificationServiceResponse{
 			Success: false,
@@ -165,6 +196,16 @@ func (ns *NotificationService) SendToTopic(topic string, notification *Notificat
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Firebase not configured - notifications are disabled",
+		}, nil
+	}
+
+	// Test Firebase connection before proceeding
+	if err := config.TestFirebaseConnection(); err != nil {
+		colors.PrintError("Firebase connection test failed: %v", err)
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "Firebase configuration error - " + err.Error(),
+			Error:   err.Error(),
 		}, nil
 	}
 
@@ -205,6 +246,16 @@ func (ns *NotificationService) SendToTopic(topic string, notification *Notificat
 	response, err := client.Send(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send notification to topic %s: %v", topic, err)
+
+		// Check if it's a 404 error (configuration issue)
+		if strings.Contains(err.Error(), "404") {
+			return &NotificationServiceResponse{
+				Success: false,
+				Message: "Firebase configuration error - Invalid project or credentials",
+				Error:   err.Error(),
+			}, nil
+		}
+
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to send notification",
@@ -257,6 +308,16 @@ func (ns *NotificationService) sendToToken(token string, notification *Notificat
 	response, err := client.Send(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send notification to token %s: %v", token, err)
+
+		// Check if it's a 404 error (configuration issue)
+		if strings.Contains(err.Error(), "404") {
+			return &NotificationServiceResponse{
+				Success: false,
+				Message: "Firebase configuration error - Invalid project or credentials",
+				Error:   err.Error(),
+			}, nil
+		}
+
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to send notification",
@@ -309,6 +370,16 @@ func (ns *NotificationService) sendToMultipleTokens(tokens []string, notificatio
 	response, err := client.SendMulticast(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send multicast notification: %v", err)
+
+		// Check if it's a 404 error (configuration issue)
+		if strings.Contains(err.Error(), "404") {
+			return &NotificationServiceResponse{
+				Success: false,
+				Message: "Firebase configuration error - Invalid project or credentials",
+				Error:   err.Error(),
+			}, nil
+		}
+
 		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to send notifications",
