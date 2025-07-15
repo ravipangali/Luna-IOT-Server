@@ -141,9 +141,10 @@ func testFirebaseConnection(client *messaging.Client) {
 			colors.PrintError("✗ Firebase configuration error: Invalid project or credentials")
 			colors.PrintError("   Error: %v", err)
 			colors.PrintInfo("   This indicates the Firebase project or service account is invalid")
-		} else if strings.Contains(err.Error(), "InvalidRegistration") {
+		} else if strings.Contains(err.Error(), "InvalidRegistration") || strings.Contains(err.Error(), "not a valid FCM registration token") {
 			colors.PrintSuccess("✓ Firebase connection test passed!")
 			colors.PrintInfo("   The error is expected (invalid token) and indicates Firebase is working")
+			colors.PrintInfo("   Your Firebase configuration is correct!")
 		} else {
 			colors.PrintWarning("? Unexpected error: %v", err)
 			colors.PrintInfo("   This might indicate a network or configuration issue")

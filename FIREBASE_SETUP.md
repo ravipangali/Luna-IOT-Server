@@ -39,7 +39,7 @@ Run the test script to verify your setup:
 
 ```bash
 cd luna_iot_server
-go run test_firebase.go
+go run cmd/test-firebase/main.go
 ```
 
 ### Step 6: Test via API
