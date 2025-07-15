@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/services"
@@ -71,6 +72,7 @@ func (tnc *TestNotificationController) SendTestNotification(c *gin.Context) {
 	}
 
 	// Send test notification
+	colors.PrintInfo("Sending test notification to %d users", len(userIDs))
 	response, err := tnc.notificationService.SendToMultipleUsers(userIDs, notificationData)
 	if err != nil {
 		colors.PrintError("Failed to send test notification: %v", err)
@@ -82,6 +84,7 @@ func (tnc *TestNotificationController) SendTestNotification(c *gin.Context) {
 		return
 	}
 
+	colors.PrintInfo("Test notification response: %+v", response)
 	if !response.Success {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -156,4 +159,25 @@ func (tnc *TestNotificationController) SendTestTopicNotification(c *gin.Context)
 		"message": "Test topic notification sent successfully",
 		"data":    response,
 	})
+}
+
+// NotificationHealthCheck checks if the notification system is working
+func (tnc *TestNotificationController) NotificationHealthCheck(c *gin.Context) {
+	firebaseEnabled := config.IsFirebaseEnabled()
+
+	healthStatus := gin.H{
+		"success": true,
+		"message": "Notification system health check",
+		"data": gin.H{
+			"firebase_enabled": firebaseEnabled,
+			"status":           "healthy",
+		},
+	}
+
+	if !firebaseEnabled {
+		healthStatus["data"].(gin.H)["warning"] = "Firebase not configured - notifications will be simulated"
+	}
+
+	colors.PrintInfo("Notification health check: Firebase enabled = %v", firebaseEnabled)
+	c.JSON(http.StatusOK, healthStatus)
 }

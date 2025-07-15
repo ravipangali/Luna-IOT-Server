@@ -371,6 +371,8 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		return
 	}
 
+	colors.PrintInfo("Found %d users for notification %d: %v", len(userIDs), id, userIDs)
+
 	// Prepare notification data
 	notificationData := &services.NotificationData{
 		Type:     notification.Type,
@@ -382,7 +384,11 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		Priority: notification.Priority,
 	}
 
+	colors.PrintInfo("Prepared notification data: Title='%s', Body='%s', Type='%s'",
+		notificationData.Title, notificationData.Body, notificationData.Type)
+
 	// Send notification
+	colors.PrintInfo("Sending notification %d to %d users", id, len(userIDs))
 	sendResponse, err := nmc.notificationService.SendToMultipleUsers(userIDs, notificationData)
 	if err != nil {
 		colors.PrintError("Failed to send notification %d: %v", id, err)
@@ -394,7 +400,9 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		return
 	}
 
+	colors.PrintInfo("Notification send response: %+v", sendResponse)
 	if !sendResponse.Success {
+		colors.PrintError("Notification send failed: %s", sendResponse.Message)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   sendResponse.Error,

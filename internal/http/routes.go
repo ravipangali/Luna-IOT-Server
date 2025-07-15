@@ -356,6 +356,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		testNotifications := v1.Group("/test/notifications")
 		testNotifications.Use(middleware.AuthMiddleware())
 		{
+			testNotifications.GET("/health", testNotificationController.NotificationHealthCheck)
 			testNotifications.POST("/send", testNotificationController.SendTestNotification)
 			testNotifications.POST("/send-to-topic/:topic", testNotificationController.SendTestTopicNotification)
 		}
