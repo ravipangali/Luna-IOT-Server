@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
@@ -40,6 +41,33 @@ func GetFirebaseConfig() *FirebaseConfig {
 }
 
 func InitializeFirebase() error {
+	// Try to read from service account file first
+	serviceAccountPath := "firebase-service-account.json"
+
+	// Check if service account file exists
+	if _, err := os.Stat(serviceAccountPath); err == nil {
+		// Use service account file
+		opt := option.WithCredentialsFile(serviceAccountPath)
+		app, err := firebase.NewApp(context.Background(), nil, opt)
+		if err != nil {
+			log.Printf("Failed to initialize Firebase with service account file: %v", err)
+			return err
+		}
+
+		firebaseApp = app
+
+		// Initialize messaging client
+		messaging, err := app.Messaging(context.Background())
+		if err != nil {
+			return err
+		}
+
+		messagingClient = messaging
+		log.Println("Firebase initialized successfully using service account file")
+		return nil
+	}
+
+	// Fallback to environment variables
 	config := GetFirebaseConfig()
 
 	if config.ProjectID == "" {
@@ -86,7 +114,7 @@ func InitializeFirebase() error {
 	}
 
 	messagingClient = messaging
-	log.Println("Firebase initialized successfully")
+	log.Println("Firebase initialized successfully using environment variables")
 	return nil
 }
 
