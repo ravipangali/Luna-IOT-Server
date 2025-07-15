@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm"
@@ -76,14 +77,24 @@ func (n *Notification) GetDataMap() map[string]interface{} {
 	}
 
 	var data map[string]interface{}
-	// Note: In a real implementation, you'd use json.Unmarshal here
-	// For now, we'll return an empty map
+	if err := json.Unmarshal([]byte(n.Data), &data); err != nil {
+		// Return empty map if unmarshaling fails
+		return make(map[string]interface{})
+	}
 	return data
 }
 
 // SetDataMap converts a map to JSON string for storage
 func (n *Notification) SetDataMap(data map[string]interface{}) {
-	// Note: In a real implementation, you'd use json.Marshal here
-	// For now, we'll set an empty string
-	n.Data = ""
+	if data == nil {
+		n.Data = ""
+		return
+	}
+
+	if dataBytes, err := json.Marshal(data); err == nil {
+		n.Data = string(dataBytes)
+	} else {
+		// Set empty string if marshaling fails
+		n.Data = ""
+	}
 }
