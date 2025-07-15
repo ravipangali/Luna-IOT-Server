@@ -28,7 +28,7 @@ type NotificationData struct {
 	CollapseKey string                 `json:"collapse_key,omitempty"`
 }
 
-type NotificationResponse struct {
+type NotificationServiceResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Error   string `json:"error,omitempty"`
@@ -41,9 +41,9 @@ func NewNotificationService() *NotificationService {
 }
 
 // SendToUser sends notification to a specific user
-func (ns *NotificationService) SendToUser(userID uint, notification *NotificationData) (*NotificationResponse, error) {
+func (ns *NotificationService) SendToUser(userID uint, notification *NotificationData) (*NotificationServiceResponse, error) {
 	if !config.IsFirebaseEnabled() {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Firebase not configured",
 		}, nil
@@ -53,14 +53,14 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 	var user models.User
 	database := db.GetDB()
 	if err := database.First(&user, userID).Error; err != nil {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "User not found",
 		}, err
 	}
 
 	if user.FCMToken == "" {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "User has no FCM token",
 		}, nil
@@ -70,9 +70,9 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 }
 
 // SendToMultipleUsers sends notification to multiple users
-func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification *NotificationData) (*NotificationResponse, error) {
+func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification *NotificationData) (*NotificationServiceResponse, error) {
 	if !config.IsFirebaseEnabled() {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Firebase not configured",
 		}, nil
@@ -82,7 +82,7 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	var users []models.User
 	database := db.GetDB()
 	if err := database.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to fetch users",
 		}, err
@@ -96,7 +96,7 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 	}
 
 	if len(tokens) == 0 {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "No valid FCM tokens found",
 		}, nil
@@ -106,9 +106,9 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 }
 
 // SendToTopic sends notification to a topic
-func (ns *NotificationService) SendToTopic(topic string, notification *NotificationData) (*NotificationResponse, error) {
+func (ns *NotificationService) SendToTopic(topic string, notification *NotificationData) (*NotificationServiceResponse, error) {
 	if !config.IsFirebaseEnabled() {
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Firebase not configured",
 		}, nil
@@ -141,21 +141,21 @@ func (ns *NotificationService) SendToTopic(topic string, notification *Notificat
 	response, err := ns.messagingClient.Send(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send notification to topic %s: %v", topic, err)
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to send notification",
 			Error:   err.Error(),
 		}, err
 	}
 
-	return &NotificationResponse{
+	return &NotificationServiceResponse{
 		Success: true,
 		Message: fmt.Sprintf("Notification sent successfully. Message ID: %s", response),
 	}, nil
 }
 
 // SendToToken sends notification to a specific FCM token
-func (ns *NotificationService) sendToToken(token string, notification *NotificationData) (*NotificationResponse, error) {
+func (ns *NotificationService) sendToToken(token string, notification *NotificationData) (*NotificationServiceResponse, error) {
 	message := &messaging.Message{
 		Token: token,
 		Notification: &messaging.Notification{
@@ -183,21 +183,21 @@ func (ns *NotificationService) sendToToken(token string, notification *Notificat
 	response, err := ns.messagingClient.Send(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send notification to token %s: %v", token, err)
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to send notification",
 			Error:   err.Error(),
 		}, err
 	}
 
-	return &NotificationResponse{
+	return &NotificationServiceResponse{
 		Success: true,
 		Message: fmt.Sprintf("Notification sent successfully. Message ID: %s", response),
 	}, nil
 }
 
 // SendToMultipleTokens sends notification to multiple FCM tokens
-func (ns *NotificationService) sendToMultipleTokens(tokens []string, notification *NotificationData) (*NotificationResponse, error) {
+func (ns *NotificationService) sendToMultipleTokens(tokens []string, notification *NotificationData) (*NotificationServiceResponse, error) {
 	message := &messaging.MulticastMessage{
 		Tokens: tokens,
 		Notification: &messaging.Notification{
@@ -225,14 +225,14 @@ func (ns *NotificationService) sendToMultipleTokens(tokens []string, notificatio
 	response, err := ns.messagingClient.SendMulticast(context.Background(), message)
 	if err != nil {
 		log.Printf("Failed to send multicast notification: %v", err)
-		return &NotificationResponse{
+		return &NotificationServiceResponse{
 			Success: false,
 			Message: "Failed to send notifications",
 			Error:   err.Error(),
 		}, err
 	}
 
-	return &NotificationResponse{
+	return &NotificationServiceResponse{
 		Success: true,
 		Message: fmt.Sprintf("Notifications sent successfully. Success: %d, Failure: %d", response.SuccessCount, response.FailureCount),
 	}, nil

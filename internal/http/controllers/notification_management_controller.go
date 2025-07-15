@@ -1,10 +1,11 @@
 package controllers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
+	"luna_iot_server/internal/db"
+	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/services"
 	"luna_iot_server/pkg/colors"
 
@@ -24,7 +25,7 @@ func NewNotificationManagementController() *NotificationManagementController {
 	}
 }
 
-// CreateNotificationRequest represents the request body for creating notifications
+// CreateNotificationRequest represents the request for creating a notification
 type CreateNotificationRequest struct {
 	Title           string                 `json:"title" binding:"required"`
 	Body            string                 `json:"body" binding:"required"`
@@ -37,7 +38,7 @@ type CreateNotificationRequest struct {
 	SendImmediately bool                   `json:"send_immediately"`
 }
 
-// UpdateNotificationRequest represents the request body for updating notifications
+// UpdateNotificationRequest represents the request for updating a notification
 type UpdateNotificationRequest struct {
 	Title           string                 `json:"title" binding:"required"`
 	Body            string                 `json:"body" binding:"required"`
@@ -50,7 +51,7 @@ type UpdateNotificationRequest struct {
 	SendImmediately bool                   `json:"send_immediately"`
 }
 
-// GetNotifications gets all notifications with pagination
+// GetNotifications retrieves all notifications with pagination
 func (nmc *NotificationManagementController) GetNotifications(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
@@ -60,33 +61,31 @@ func (nmc *NotificationManagementController) GetNotifications(c *gin.Context) {
 		colors.PrintError("Failed to get notifications: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Failed to fetch notifications",
-			"error":   err.Error(),
+			"error":   "Failed to retrieve notifications",
+			"message": err.Error(),
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Notifications fetched successfully",
+		"message": "Notifications retrieved successfully",
 		"data":    notifications,
-		"pagination": gin.H{
-			"page":  page,
-			"limit": limit,
-			"total": total,
-			"pages": (int(total) + limit - 1) / limit,
-		},
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
 	})
 }
 
-// GetNotification gets a specific notification by ID
+// GetNotification retrieves a specific notification by ID
 func (nmc *NotificationManagementController) GetNotification(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid notification ID",
+			"error":   "Invalid notification ID",
+			"message": "Please provide a valid notification ID",
 		})
 		return
 	}
@@ -96,22 +95,23 @@ func (nmc *NotificationManagementController) GetNotification(c *gin.Context) {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
-				"message": "Notification not found",
+				"error":   "Notification not found",
+				"message": "The requested notification does not exist",
 			})
 			return
 		}
-		colors.PrintError("Failed to get notification: %v", err)
+		colors.PrintError("Failed to get notification %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Failed to fetch notification",
-			"error":   err.Error(),
+			"error":   "Failed to retrieve notification",
+			"message": err.Error(),
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Notification fetched successfully",
+		"message": "Notification retrieved successfully",
 		"data":    notification,
 	})
 }
@@ -120,23 +120,26 @@ func (nmc *NotificationManagementController) GetNotification(c *gin.Context) {
 func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) {
 	var req CreateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		colors.PrintError("Invalid create notification request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid request body",
-			"error":   err.Error(),
+			"error":   "Invalid request format",
+			"message": err.Error(),
 		})
 		return
 	}
 
 	// Get current user from context
-	userID, exists := c.Get("user_id")
+	userInterface, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
+			"error":   "Unauthorized",
 			"message": "User not authenticated",
 		})
 		return
 	}
+	user := userInterface.(*models.User)
 
 	// Create notification request for database service
 	dbReq := &services.CreateNotificationRequest{
@@ -148,7 +151,7 @@ func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) 
 		Priority:  req.Priority,
 		Data:      req.Data,
 		UserIDs:   req.UserIDs,
-		CreatedBy: userID.(uint),
+		CreatedBy: user.ID,
 	}
 
 	// Save notification to database
@@ -157,72 +160,47 @@ func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) 
 		colors.PrintError("Failed to create notification: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": response.Message,
-			"error":   response.Error,
+			"error":   "Failed to create notification",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	// Send notification immediately if requested
+	if !response.Success {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   response.Error,
+			"message": response.Message,
+		})
+		return
+	}
+
+	// If send immediately is requested, send the notification
 	if req.SendImmediately {
-		colors.PrintInfo("Sending notification immediately for ID: %d", response.Data.ID)
-
-		// Convert data JSON to map for sending
-		var data map[string]interface{}
-		if response.Data.Data != "" {
-			if err := json.Unmarshal([]byte(response.Data.Data), &data); err != nil {
-				colors.PrintWarning("Failed to unmarshal notification data: %v", err)
-				data = make(map[string]interface{})
-			}
-		}
-
 		notificationData := &services.NotificationData{
-			Type:     response.Data.Type,
-			Title:    response.Data.Title,
-			Body:     response.Data.Body,
-			Data:     data,
-			ImageURL: response.Data.ImageURL,
-			Sound:    response.Data.Sound,
-			Priority: response.Data.Priority,
+			Type:     req.Type,
+			Title:    req.Title,
+			Body:     req.Body,
+			Data:     req.Data,
+			ImageURL: req.ImageURL,
+			Sound:    req.Sound,
+			Priority: req.Priority,
 		}
 
-		sendResponse, sendErr := nmc.notificationService.SendToMultipleUsers(req.UserIDs, notificationData)
-		if sendErr != nil {
-			colors.PrintError("Failed to send notification: %v", sendErr)
-			c.JSON(http.StatusOK, gin.H{
-				"success":    true,
-				"message":    "Notification created but failed to send immediately",
-				"data":       response.Data,
-				"send_error": sendErr.Error(),
-			})
-			return
-		}
-
-		if sendResponse.Success {
-			// Mark notification as sent in database
-			if markErr := nmc.notificationDBService.MarkNotificationAsSent(response.Data.ID); markErr != nil {
-				colors.PrintWarning("Failed to mark notification as sent: %v", markErr)
+		sendResponse, err := nmc.notificationService.SendToMultipleUsers(req.UserIDs, notificationData)
+		if err != nil {
+			colors.PrintError("Failed to send notification: %v", err)
+			// Don't fail the request, just log the error
+		} else if sendResponse.Success {
+			// Mark notification as sent
+			if err := nmc.notificationDBService.MarkNotificationAsSent(response.Data.ID); err != nil {
+				colors.PrintError("Failed to mark notification as sent: %v", err)
 			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"success":  true,
-				"message":  "Notification created and sent successfully",
-				"data":     response.Data,
-				"response": sendResponse,
-			})
-			return
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"success":    true,
-				"message":    "Notification created but failed to send",
-				"data":       response.Data,
-				"send_error": sendResponse.Message,
-			})
-			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	colors.PrintSuccess("Notification created successfully with ID: %d", response.Data.ID)
+	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"message": "Notification created successfully",
 		"data":    response.Data,
@@ -236,22 +214,24 @@ func (nmc *NotificationManagementController) UpdateNotification(c *gin.Context) 
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid notification ID",
+			"error":   "Invalid notification ID",
+			"message": "Please provide a valid notification ID",
 		})
 		return
 	}
 
 	var req UpdateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		colors.PrintError("Invalid update notification request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid request body",
-			"error":   err.Error(),
+			"error":   "Invalid request format",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	// Update notification request for database service
+	// Create update request for database service
 	dbReq := &services.UpdateNotificationRequest{
 		Title:    req.Title,
 		Body:     req.Body,
@@ -266,74 +246,49 @@ func (nmc *NotificationManagementController) UpdateNotification(c *gin.Context) 
 	// Update notification in database
 	response, err := nmc.notificationDBService.UpdateNotification(uint(id), dbReq)
 	if err != nil {
-		colors.PrintError("Failed to update notification: %v", err)
+		colors.PrintError("Failed to update notification %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": response.Message,
-			"error":   response.Error,
+			"error":   "Failed to update notification",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	// Send notification immediately if requested
+	if !response.Success {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   response.Error,
+			"message": response.Message,
+		})
+		return
+	}
+
+	// If send immediately is requested, send the notification
 	if req.SendImmediately {
-		colors.PrintInfo("Sending updated notification immediately for ID: %d", response.Data.ID)
-
-		// Convert data JSON to map for sending
-		var data map[string]interface{}
-		if response.Data.Data != "" {
-			if err := json.Unmarshal([]byte(response.Data.Data), &data); err != nil {
-				colors.PrintWarning("Failed to unmarshal notification data: %v", err)
-				data = make(map[string]interface{})
-			}
-		}
-
 		notificationData := &services.NotificationData{
-			Type:     response.Data.Type,
-			Title:    response.Data.Title,
-			Body:     response.Data.Body,
-			Data:     data,
-			ImageURL: response.Data.ImageURL,
-			Sound:    response.Data.Sound,
-			Priority: response.Data.Priority,
+			Type:     req.Type,
+			Title:    req.Title,
+			Body:     req.Body,
+			Data:     req.Data,
+			ImageURL: req.ImageURL,
+			Sound:    req.Sound,
+			Priority: req.Priority,
 		}
 
-		sendResponse, sendErr := nmc.notificationService.SendToMultipleUsers(req.UserIDs, notificationData)
-		if sendErr != nil {
-			colors.PrintError("Failed to send updated notification: %v", sendErr)
-			c.JSON(http.StatusOK, gin.H{
-				"success":    true,
-				"message":    "Notification updated but failed to send immediately",
-				"data":       response.Data,
-				"send_error": sendErr.Error(),
-			})
-			return
-		}
-
-		if sendResponse.Success {
-			// Mark notification as sent in database
-			if markErr := nmc.notificationDBService.MarkNotificationAsSent(response.Data.ID); markErr != nil {
-				colors.PrintWarning("Failed to mark updated notification as sent: %v", markErr)
+		sendResponse, err := nmc.notificationService.SendToMultipleUsers(req.UserIDs, notificationData)
+		if err != nil {
+			colors.PrintError("Failed to send notification: %v", err)
+			// Don't fail the request, just log the error
+		} else if sendResponse.Success {
+			// Mark notification as sent
+			if err := nmc.notificationDBService.MarkNotificationAsSent(response.Data.ID); err != nil {
+				colors.PrintError("Failed to mark notification as sent: %v", err)
 			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"success":  true,
-				"message":  "Notification updated and sent successfully",
-				"data":     response.Data,
-				"response": sendResponse,
-			})
-			return
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"success":    true,
-				"message":    "Notification updated but failed to send",
-				"data":       response.Data,
-				"send_error": sendResponse.Message,
-			})
-			return
 		}
 	}
 
+	colors.PrintSuccess("Notification updated successfully with ID: %d", response.Data.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Notification updated successfully",
@@ -348,29 +303,23 @@ func (nmc *NotificationManagementController) DeleteNotification(c *gin.Context) 
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid notification ID",
+			"error":   "Invalid notification ID",
+			"message": "Please provide a valid notification ID",
 		})
 		return
 	}
 
-	err = nmc.notificationDBService.DeleteNotification(uint(id))
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"message": "Notification not found",
-			})
-			return
-		}
-		colors.PrintError("Failed to delete notification: %v", err)
+	if err := nmc.notificationDBService.DeleteNotification(uint(id)); err != nil {
+		colors.PrintError("Failed to delete notification %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Failed to delete notification",
-			"error":   err.Error(),
+			"error":   "Failed to delete notification",
+			"message": err.Error(),
 		})
 		return
 	}
 
+	colors.PrintSuccess("Notification deleted successfully with ID: %d", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Notification deleted successfully",
@@ -384,7 +333,8 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid notification ID",
+			"error":   "Invalid notification ID",
+			"message": "Please provide a valid notification ID",
 		})
 		return
 	}
@@ -395,74 +345,73 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
-				"message": "Notification not found",
+				"error":   "Notification not found",
+				"message": "The requested notification does not exist",
 			})
 			return
 		}
-		colors.PrintError("Failed to get notification: %v", err)
+		colors.PrintError("Failed to get notification %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Failed to fetch notification",
-			"error":   err.Error(),
+			"error":   "Failed to retrieve notification",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	// Get user IDs
+	// Get user IDs for this notification
 	var userIDs []uint
-	for _, user := range notification.Users {
-		userIDs = append(userIDs, user.ID)
-	}
-
-	if len(userIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
+	if err := db.GetDB().Model(&notification).Association("Users").Find(&userIDs); err != nil {
+		colors.PrintError("Failed to get user IDs for notification %d: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "No users associated with this notification",
+			"error":   "Failed to get notification users",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	// Convert data JSON to map
-	var data map[string]interface{}
-	if notification.Data != "" {
-		if err := json.Unmarshal([]byte(notification.Data), &data); err != nil {
-			colors.PrintWarning("Failed to unmarshal notification data: %v", err)
-			data = make(map[string]interface{})
-		}
-	}
-
-	// Send notification
+	// Prepare notification data
 	notificationData := &services.NotificationData{
 		Type:     notification.Type,
 		Title:    notification.Title,
 		Body:     notification.Body,
-		Data:     data,
+		Data:     notification.GetDataMap(),
 		ImageURL: notification.ImageURL,
 		Sound:    notification.Sound,
 		Priority: notification.Priority,
 	}
 
-	response, err := nmc.notificationService.SendToMultipleUsers(userIDs, notificationData)
+	// Send notification
+	sendResponse, err := nmc.notificationService.SendToMultipleUsers(userIDs, notificationData)
 	if err != nil {
-		colors.PrintError("Failed to send notification: %v", err)
+		colors.PrintError("Failed to send notification %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"message": "Failed to send notification",
-			"error":   err.Error(),
+			"error":   "Failed to send notification",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	if response.Success {
-		// Mark notification as sent in database
-		if markErr := nmc.notificationDBService.MarkNotificationAsSent(notification.ID); markErr != nil {
-			colors.PrintWarning("Failed to mark notification as sent: %v", markErr)
-		}
+	if !sendResponse.Success {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   sendResponse.Error,
+			"message": sendResponse.Message,
+		})
+		return
 	}
 
+	// Mark notification as sent
+	if err := nmc.notificationDBService.MarkNotificationAsSent(uint(id)); err != nil {
+		colors.PrintError("Failed to mark notification as sent: %v", err)
+	}
+
+	colors.PrintSuccess("Notification sent successfully with ID: %d", id)
 	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"message":  "Notification sent successfully",
-		"response": response,
+		"success": true,
+		"message": "Notification sent successfully",
+		"data":    sendResponse,
 	})
 }
