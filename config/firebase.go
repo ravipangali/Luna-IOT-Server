@@ -54,7 +54,8 @@ func InitializeFirebase() error {
 		app, err := firebase.NewApp(context.Background(), nil, opt)
 		if err != nil {
 			colors.PrintError("Failed to initialize Firebase with service account file: %v", err)
-			return err
+			colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+			return nil // Don't return error, just disable Firebase
 		}
 
 		firebaseApp = app
@@ -63,7 +64,8 @@ func InitializeFirebase() error {
 		messaging, err := app.Messaging(context.Background())
 		if err != nil {
 			colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
-			return err
+			colors.PrintWarning("Firebase messaging client failed, push notifications will be disabled")
+			return nil // Don't return error, just disable Firebase
 		}
 
 		messagingClient = messaging
@@ -102,7 +104,8 @@ func InitializeFirebase() error {
 	credentialsJSON, err := json.Marshal(credentials)
 	if err != nil {
 		colors.PrintError("Failed to marshal Firebase credentials: %v", err)
-		return err
+		colors.PrintWarning("Firebase initialization failed, push notifications will be disabled")
+		return nil // Don't return error, just disable Firebase
 	}
 
 	// Initialize Firebase app
@@ -113,7 +116,8 @@ func InitializeFirebase() error {
 
 	if err != nil {
 		colors.PrintError("Failed to create Firebase app: %v", err)
-		return err
+		colors.PrintWarning("Firebase app creation failed, push notifications will be disabled")
+		return nil // Don't return error, just disable Firebase
 	}
 
 	firebaseApp = app
@@ -122,7 +126,8 @@ func InitializeFirebase() error {
 	messaging, err := app.Messaging(context.Background())
 	if err != nil {
 		colors.PrintError("Failed to initialize Firebase messaging client: %v", err)
-		return err
+		colors.PrintWarning("Firebase messaging client failed, push notifications will be disabled")
+		return nil // Don't return error, just disable Firebase
 	}
 
 	messagingClient = messaging
