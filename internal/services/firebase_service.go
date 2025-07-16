@@ -28,7 +28,7 @@ type NotificationMessage struct {
 	CollapseKey string            `json:"collapse_key,omitempty"`
 }
 
-type NotificationResponse struct {
+type FirebaseNotificationResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Error   string `json:"error,omitempty"`
@@ -64,9 +64,9 @@ func NewFirebaseService() *FirebaseService {
 }
 
 // SendNotification sends a notification to a specific FCM token
-func (fs *FirebaseService) SendNotification(msg *NotificationMessage) (*NotificationResponse, error) {
+func (fs *FirebaseService) SendNotification(msg *NotificationMessage) (*FirebaseNotificationResponse, error) {
 	if !fs.isActive {
-		return &NotificationResponse{
+		return &FirebaseNotificationResponse{
 			Success: false,
 			Message: "Firebase service not initialized",
 		}, fmt.Errorf("firebase service not active")
@@ -125,7 +125,7 @@ func (fs *FirebaseService) SendNotification(msg *NotificationMessage) (*Notifica
 	response, err := fs.client.Send(ctx, fcmMessage)
 	if err != nil {
 		colors.PrintError("Error sending FCM message: %v", err)
-		return &NotificationResponse{
+		return &FirebaseNotificationResponse{
 			Success: false,
 			Message: "Failed to send notification",
 			Error:   err.Error(),
@@ -133,16 +133,16 @@ func (fs *FirebaseService) SendNotification(msg *NotificationMessage) (*Notifica
 	}
 
 	colors.PrintSuccess("Successfully sent notification: %s", response)
-	return &NotificationResponse{
+	return &FirebaseNotificationResponse{
 		Success: true,
 		Message: "Notification sent successfully",
 	}, nil
 }
 
 // SendToMultipleTokens sends notification to multiple FCM tokens
-func (fs *FirebaseService) SendToMultipleTokens(tokens []string, title, body string, data map[string]string) (*NotificationResponse, error) {
+func (fs *FirebaseService) SendToMultipleTokens(tokens []string, title, body string, data map[string]string) (*FirebaseNotificationResponse, error) {
 	if !fs.isActive {
-		return &NotificationResponse{
+		return &FirebaseNotificationResponse{
 			Success: false,
 			Message: "Firebase service not initialized",
 		}, fmt.Errorf("firebase service not active")
@@ -164,7 +164,7 @@ func (fs *FirebaseService) SendToMultipleTokens(tokens []string, title, body str
 	response, err := fs.client.SendMulticast(ctx, message)
 	if err != nil {
 		colors.PrintError("Error sending FCM multicast message: %v", err)
-		return &NotificationResponse{
+		return &FirebaseNotificationResponse{
 			Success: false,
 			Message: "Failed to send multicast notification",
 			Error:   err.Error(),
@@ -172,16 +172,16 @@ func (fs *FirebaseService) SendToMultipleTokens(tokens []string, title, body str
 	}
 
 	colors.PrintSuccess("Successfully sent multicast message: %d successful, %d failed", response.SuccessCount, response.FailureCount)
-	return &NotificationResponse{
+	return &FirebaseNotificationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Multicast notifications sent successfully: %d successful, %d failed", response.SuccessCount, response.FailureCount),
 	}, nil
 }
 
 // SendToTopic sends notification to a topic
-func (fs *FirebaseService) SendToTopic(topic, title, body string, data map[string]string) (*NotificationResponse, error) {
+func (fs *FirebaseService) SendToTopic(topic, title, body string, data map[string]string) (*FirebaseNotificationResponse, error) {
 	if !fs.isActive {
-		return &NotificationResponse{
+		return &FirebaseNotificationResponse{
 			Success: false,
 			Message: "Firebase service not initialized",
 		}, fmt.Errorf("firebase service not active")
@@ -203,7 +203,7 @@ func (fs *FirebaseService) SendToTopic(topic, title, body string, data map[strin
 	response, err := fs.client.Send(ctx, message)
 	if err != nil {
 		colors.PrintError("Error sending FCM topic message: %v", err)
-		return &NotificationResponse{
+		return &FirebaseNotificationResponse{
 			Success: false,
 			Message: "Failed to send topic notification",
 			Error:   err.Error(),
@@ -211,7 +211,7 @@ func (fs *FirebaseService) SendToTopic(topic, title, body string, data map[strin
 	}
 
 	colors.PrintSuccess("Successfully sent topic message: %s", response)
-	return &NotificationResponse{
+	return &FirebaseNotificationResponse{
 		Success: true,
 		Message: fmt.Sprintf("Topic notification sent successfully for topic '%s'", topic),
 	}, nil

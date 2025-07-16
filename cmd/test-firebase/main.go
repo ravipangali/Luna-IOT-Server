@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"luna_iot_server/internal/services"
 	"luna_iot_server/pkg/colors"
 )
@@ -85,4 +84,4 @@ func main() {
 	}
 
 	colors.PrintSuccess("Firebase service test completed successfully!")
-} 
+}
