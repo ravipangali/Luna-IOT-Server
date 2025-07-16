@@ -28,7 +28,7 @@ func main() {
 
 	// Example: Send notification to a specific token
 	// Replace with actual FCM token
-	testToken := "cSMQwCvFT8yZEP_mpqPsu_:APA91bFDpU_GXdsXXxamS8TpGjCybOEXqDzLyEo38z8W7nEfrgvspbe4RU8hAJZ5T7t7ectX76SaIbAxtcKpvSUk1_NwRSZFAzdN1T_UHo-jnw7vnHAW89o"
+	testToken := ""
 
 	notification := &services.NotificationMessage{
 		Token:       testToken,
