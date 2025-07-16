@@ -1,22 +1,17 @@
 package services
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 
-	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
-
-	"firebase.google.com/go/v4/messaging"
 )
 
 type NotificationService struct {
-	// Remove the messagingClient field since we'll get it dynamically
+	// No Firebase dependencies
 }
 
 type NotificationData struct {
@@ -40,43 +35,14 @@ func NewNotificationService() *NotificationService {
 	return &NotificationService{}
 }
 
-// getMessagingClient gets the messaging client dynamically
-func (ns *NotificationService) getMessagingClient() *messaging.Client {
-	client := config.GetMessagingClient()
-	if client == nil {
-		colors.PrintError("Firebase messaging client is nil - Firebase may not be properly initialized")
-	}
-	return client
-}
-
-// SendToUser sends notification to a specific user
+// SendToUser sends notification to a specific user (simulated)
 func (ns *NotificationService) SendToUser(userID uint, notification *NotificationData) (*NotificationServiceResponse, error) {
-	// Add detailed Firebase debugging
-	colors.PrintInfo("=== FIREBASE DEBUG INFO (SendToUser) ===")
-	colors.PrintInfo("IsFirebaseEnabled(): %v", config.IsFirebaseEnabled())
-	colors.PrintInfo("GetMessagingClient(): %v", config.GetMessagingClient())
-	colors.PrintInfo("NotificationService messagingClient: %v", ns.getMessagingClient())
-	colors.PrintInfo("=========================================")
+	colors.PrintInfo("=== NOTIFICATION DEBUG INFO (SendToUser) ===")
+	colors.PrintInfo("Firebase removed - simulating notification for user %d", userID)
+	colors.PrintInfo("Notification: Title='%s', Body='%s'", notification.Title, notification.Body)
+	colors.PrintInfo("=============================================")
 
-	if !config.IsFirebaseEnabled() {
-		colors.PrintError("Firebase not configured, cannot send notification to user %d: %s", userID, notification.Title)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase not configured - notifications are disabled",
-		}, nil
-	}
-
-	// Test Firebase connection before proceeding
-	if err := config.TestFirebaseConnection(); err != nil {
-		colors.PrintError("Firebase connection test failed: %v", err)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase configuration error - " + err.Error(),
-			Error:   err.Error(),
-		}, nil
-	}
-
-	// Get user's FCM token from database
+	// Get user from database
 	var user models.User
 	database := db.GetDB()
 	if err := database.First(&user, userID).Error; err != nil {
@@ -87,51 +53,26 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 		}, err
 	}
 
-	if user.FCMToken == "" {
-		log.Printf("User %d has no FCM token", userID)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "User has no FCM token - user needs to register for notifications",
-		}, nil
-	}
+	// Simulate successful notification
+	log.Printf("Simulated notification sent to user %d: %s", userID, notification.Title)
 
-	return ns.sendToToken(user.FCMToken, notification)
+	return &NotificationServiceResponse{
+		Success: true,
+		Message: "Notification simulated successfully (Firebase removed)",
+	}, nil
 }
 
-// SendToMultipleUsers sends notification to multiple users
+// SendToMultipleUsers sends notification to multiple users (simulated)
 func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification *NotificationData) (*NotificationServiceResponse, error) {
 	colors.PrintInfo("SendToMultipleUsers called with %d user IDs: %v", len(userIDs), userIDs)
 	colors.PrintInfo("Notification data: Title='%s', Body='%s', Type='%s'",
 		notification.Title, notification.Body, notification.Type)
 
-	// Add detailed Firebase debugging
-	colors.PrintInfo("=== FIREBASE DEBUG INFO ===")
-	colors.PrintInfo("IsFirebaseEnabled(): %v", config.IsFirebaseEnabled())
-	colors.PrintInfo("GetMessagingClient(): %v", config.GetMessagingClient())
-	colors.PrintInfo("NotificationService messagingClient: %v", ns.getMessagingClient())
-	colors.PrintInfo("===========================")
+	colors.PrintInfo("=== NOTIFICATION DEBUG INFO ===")
+	colors.PrintInfo("Firebase removed - simulating notifications for %d users", len(userIDs))
+	colors.PrintInfo("===============================")
 
-	if !config.IsFirebaseEnabled() {
-		colors.PrintError("Firebase not configured, cannot send notification to %d users: %s", len(userIDs), notification.Title)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase not configured - notifications are disabled",
-		}, nil
-	}
-
-	// Test Firebase connection before proceeding
-	if err := config.TestFirebaseConnection(); err != nil {
-		colors.PrintError("Firebase connection test failed: %v", err)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase configuration error - " + err.Error(),
-			Error:   err.Error(),
-		}, nil
-	}
-
-	colors.PrintInfo("Firebase is enabled and connection test passed, proceeding with notification send")
-
-	// Get users' FCM tokens from database
+	// Get users from database
 	var users []models.User
 	database := db.GetDB()
 	if err := database.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
@@ -144,256 +85,46 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 
 	colors.PrintInfo("Found %d users in database", len(users))
 
-	var tokens []string
-	for _, user := range users {
-		if user.FCMToken != "" {
-			tokens = append(tokens, user.FCMToken)
-			colors.PrintInfo("User %d has FCM token: %s", user.ID, user.FCMToken[:20]+"...")
-		} else {
-			colors.PrintInfo("User %d has no FCM token", user.ID)
-		}
-	}
+	// Simulate successful notification
+	log.Printf("Simulated notifications sent to %d users: %s", len(users), notification.Title)
 
-	if len(tokens) == 0 {
-		colors.PrintWarning("No valid FCM tokens found for users: %v", userIDs)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "No valid FCM tokens found - users need to register for notifications",
-		}, nil
-	}
-
-	colors.PrintInfo("Sending notification to %d FCM tokens", len(tokens))
-
-	// Try to send notification, but handle Firebase errors gracefully
-	response, err := ns.sendToMultipleTokens(tokens, notification)
-	if err != nil {
-		colors.PrintError("Firebase notification failed: %v", err)
-
-		// Check if it's a 404 error (configuration issue)
-		if strings.Contains(err.Error(), "404") {
-			return &NotificationServiceResponse{
-				Success: false,
-				Message: "Firebase configuration error - Invalid project or credentials",
-				Error:   err.Error(),
-			}, nil
-		}
-
-		// Return failure for other Firebase errors
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Failed to send notification - Firebase error",
-			Error:   err.Error(),
-		}, nil
-	}
-
-	return response, nil
+	return &NotificationServiceResponse{
+		Success: true,
+		Message: fmt.Sprintf("Notifications simulated successfully for %d users (Firebase removed)", len(users)),
+	}, nil
 }
 
-// SendToTopic sends notification to a topic
+// SendToTopic sends notification to a topic (simulated)
 func (ns *NotificationService) SendToTopic(topic string, notification *NotificationData) (*NotificationServiceResponse, error) {
-	if !config.IsFirebaseEnabled() {
-		log.Printf("Firebase not configured, returning failure for topic notification: %s", notification.Title)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase not configured - notifications are disabled",
-		}, nil
-	}
-
-	// Test Firebase connection before proceeding
-	if err := config.TestFirebaseConnection(); err != nil {
-		colors.PrintError("Firebase connection test failed: %v", err)
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase configuration error - " + err.Error(),
-			Error:   err.Error(),
-		}, nil
-	}
-
-	client := ns.getMessagingClient()
-	if client == nil {
-		colors.PrintError("Cannot send topic notification - Firebase messaging client is nil")
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase messaging client not available",
-			Error:   "Firebase not properly initialized",
-		}, fmt.Errorf("Firebase messaging client is nil")
-	}
-
-	message := &messaging.Message{
-		Topic: topic,
-		Notification: &messaging.Notification{
-			Title: notification.Title,
-			Body:  notification.Body,
-		},
-		Data: ns.convertDataToMap(notification.Data),
-		Android: &messaging.AndroidConfig{
-			Priority: notification.Priority,
-			Notification: &messaging.AndroidNotification{
-				Sound: notification.Sound,
-				Icon:  "ic_notification",
-			},
-		},
-		APNS: &messaging.APNSConfig{
-			Payload: &messaging.APNSPayload{
-				Aps: &messaging.Aps{
-					Sound: notification.Sound,
-					Badge: func() *int { i := 1; return &i }(),
-				},
-			},
-		},
-	}
-
-	response, err := client.Send(context.Background(), message)
-	if err != nil {
-		log.Printf("Failed to send notification to topic %s: %v", topic, err)
-
-		// Check if it's a 404 error (configuration issue)
-		if strings.Contains(err.Error(), "404") {
-			return &NotificationServiceResponse{
-				Success: false,
-				Message: "Firebase configuration error - Invalid project or credentials",
-				Error:   err.Error(),
-			}, nil
-		}
-
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Failed to send notification",
-			Error:   err.Error(),
-		}, err
-	}
+	log.Printf("Simulated topic notification: %s", notification.Title)
 
 	return &NotificationServiceResponse{
 		Success: true,
-		Message: fmt.Sprintf("Notification sent successfully. Message ID: %s", response),
+		Message: fmt.Sprintf("Topic notification simulated successfully for topic '%s' (Firebase removed)", topic),
 	}, nil
 }
 
-// SendToToken sends notification to a specific FCM token
+// SendToToken sends notification to a specific FCM token (simulated)
 func (ns *NotificationService) sendToToken(token string, notification *NotificationData) (*NotificationServiceResponse, error) {
-	client := ns.getMessagingClient()
-	if client == nil {
-		colors.PrintError("Cannot send notification - Firebase messaging client is nil")
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase messaging client not available",
-			Error:   "Firebase not properly initialized",
-		}, fmt.Errorf("Firebase messaging client is nil")
-	}
-
-	message := &messaging.Message{
-		Token: token,
-		Notification: &messaging.Notification{
-			Title: notification.Title,
-			Body:  notification.Body,
-		},
-		Data: ns.convertDataToMap(notification.Data),
-		Android: &messaging.AndroidConfig{
-			Priority: notification.Priority,
-			Notification: &messaging.AndroidNotification{
-				Sound: notification.Sound,
-				Icon:  "ic_notification",
-			},
-		},
-		APNS: &messaging.APNSConfig{
-			Payload: &messaging.APNSPayload{
-				Aps: &messaging.Aps{
-					Sound: notification.Sound,
-					Badge: func() *int { i := 1; return &i }(),
-				},
-			},
-		},
-	}
-
-	response, err := client.Send(context.Background(), message)
-	if err != nil {
-		log.Printf("Failed to send notification to token %s: %v", token, err)
-
-		// Check if it's a 404 error (configuration issue)
-		if strings.Contains(err.Error(), "404") {
-			return &NotificationServiceResponse{
-				Success: false,
-				Message: "Firebase configuration error - Invalid project or credentials",
-				Error:   err.Error(),
-			}, nil
-		}
-
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Failed to send notification",
-			Error:   err.Error(),
-		}, err
-	}
+	log.Printf("Simulated token notification: %s", notification.Title)
 
 	return &NotificationServiceResponse{
 		Success: true,
-		Message: fmt.Sprintf("Notification sent successfully. Message ID: %s", response),
+		Message: "Token notification simulated successfully (Firebase removed)",
 	}, nil
 }
 
-// SendToMultipleTokens sends notification to multiple FCM tokens
+// SendToMultipleTokens sends notification to multiple FCM tokens (simulated)
 func (ns *NotificationService) sendToMultipleTokens(tokens []string, notification *NotificationData) (*NotificationServiceResponse, error) {
-	client := ns.getMessagingClient()
-	if client == nil {
-		colors.PrintError("Cannot send multicast notification - Firebase messaging client is nil")
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Firebase messaging client not available",
-			Error:   "Firebase not properly initialized",
-		}, fmt.Errorf("Firebase messaging client is nil")
-	}
-
-	message := &messaging.MulticastMessage{
-		Tokens: tokens,
-		Notification: &messaging.Notification{
-			Title: notification.Title,
-			Body:  notification.Body,
-		},
-		Data: ns.convertDataToMap(notification.Data),
-		Android: &messaging.AndroidConfig{
-			Priority: notification.Priority,
-			Notification: &messaging.AndroidNotification{
-				Sound: notification.Sound,
-				Icon:  "ic_notification",
-			},
-		},
-		APNS: &messaging.APNSConfig{
-			Payload: &messaging.APNSPayload{
-				Aps: &messaging.Aps{
-					Sound: notification.Sound,
-					Badge: func() *int { i := 1; return &i }(),
-				},
-			},
-		},
-	}
-
-	response, err := client.SendMulticast(context.Background(), message)
-	if err != nil {
-		log.Printf("Failed to send multicast notification: %v", err)
-
-		// Check if it's a 404 error (configuration issue)
-		if strings.Contains(err.Error(), "404") {
-			return &NotificationServiceResponse{
-				Success: false,
-				Message: "Firebase configuration error - Invalid project or credentials",
-				Error:   err.Error(),
-			}, nil
-		}
-
-		return &NotificationServiceResponse{
-			Success: false,
-			Message: "Failed to send notifications",
-			Error:   err.Error(),
-		}, err
-	}
+	log.Printf("Simulated multicast notification to %d tokens: %s", len(tokens), notification.Title)
 
 	return &NotificationServiceResponse{
 		Success: true,
-		Message: fmt.Sprintf("Notifications sent successfully. Success: %d, Failure: %d", response.SuccessCount, response.FailureCount),
+		Message: fmt.Sprintf("Multicast notifications simulated successfully for %d tokens (Firebase removed)", len(tokens)),
 	}, nil
 }
 
-// convertDataToMap converts notification data to string map for FCM
+// convertDataToMap converts notification data to string map (kept for compatibility)
 func (ns *NotificationService) convertDataToMap(data map[string]interface{}) map[string]string {
 	result := make(map[string]string)
 	for key, value := range data {
@@ -416,64 +147,28 @@ func (ns *NotificationService) convertDataToMap(data map[string]interface{}) map
 	return result
 }
 
-// UpdateUserFCMToken updates user's FCM token
+// UpdateUserFCMToken updates user's FCM token (simulated)
 func (ns *NotificationService) UpdateUserFCMToken(userID uint, fcmToken string) error {
 	database := db.GetDB()
+	log.Printf("Simulated FCM token update for user %d", userID)
 	return database.Model(&models.User{}).Where("id = ?", userID).Update("fcm_token", fcmToken).Error
 }
 
-// RemoveUserFCMToken removes user's FCM token
+// RemoveUserFCMToken removes user's FCM token (simulated)
 func (ns *NotificationService) RemoveUserFCMToken(userID uint) error {
 	database := db.GetDB()
+	log.Printf("Simulated FCM token removal for user %d", userID)
 	return database.Model(&models.User{}).Where("id = ?", userID).Update("fcm_token", "").Error
 }
 
-// SubscribeToTopic subscribes a user to a topic
+// SubscribeToTopic subscribes a user to a topic (simulated)
 func (ns *NotificationService) SubscribeToTopic(userID uint, topic string) error {
-	if !config.IsFirebaseEnabled() {
-		return fmt.Errorf("Firebase not configured")
-	}
-
-	client := ns.getMessagingClient()
-	if client == nil {
-		return fmt.Errorf("Firebase messaging client not available")
-	}
-
-	var user models.User
-	database := db.GetDB()
-	if err := database.First(&user, userID).Error; err != nil {
-		return err
-	}
-
-	if user.FCMToken == "" {
-		return fmt.Errorf("User has no FCM token")
-	}
-
-	_, err := client.SubscribeToTopic(context.Background(), []string{user.FCMToken}, topic)
-	return err
+	log.Printf("Simulated topic subscription for user %d to topic '%s'", userID, topic)
+	return nil
 }
 
-// UnsubscribeFromTopic unsubscribes a user from a topic
+// UnsubscribeFromTopic unsubscribes a user from a topic (simulated)
 func (ns *NotificationService) UnsubscribeFromTopic(userID uint, topic string) error {
-	if !config.IsFirebaseEnabled() {
-		return fmt.Errorf("Firebase not configured")
-	}
-
-	client := ns.getMessagingClient()
-	if client == nil {
-		return fmt.Errorf("Firebase messaging client not available")
-	}
-
-	var user models.User
-	database := db.GetDB()
-	if err := database.First(&user, userID).Error; err != nil {
-		return err
-	}
-
-	if user.FCMToken == "" {
-		return fmt.Errorf("User has no FCM token")
-	}
-
-	_, err := client.UnsubscribeFromTopic(context.Background(), []string{user.FCMToken}, topic)
-	return err
+	log.Printf("Simulated topic unsubscription for user %d from topic '%s'", userID, topic)
+	return nil
 }

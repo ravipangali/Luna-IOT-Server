@@ -3,7 +3,7 @@ module luna_iot_server
 go 1.24.3
 
 require (
-	firebase.google.com/go/v4 v4.12.0
+	// Firebase removed
 	github.com/gin-gonic/gin v1.10.1
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.5.1

@@ -4,9 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"luna_iot_server/config"
 	"luna_iot_server/internal/services"
-	"luna_iot_server/pkg/colors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -326,46 +324,14 @@ func (nc *NotificationController) SendToUser(c *gin.Context) {
 	})
 }
 
-// TestFirebaseConnection tests Firebase configuration
+// TestFirebaseConnection removed - Firebase has been removed from this project
 func (nc *NotificationController) TestFirebaseConnection(c *gin.Context) {
-	colors.PrintInfo("Testing Firebase connection...")
-
-	// Test if Firebase is enabled
-	if !config.IsFirebaseEnabled() {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "Firebase is not enabled",
-			"details": map[string]interface{}{
-				"firebase_enabled": false,
-				"messaging_client": config.GetMessagingClient() != nil,
-			},
-		})
-		return
-	}
-
-	// Test Firebase connection
-	err := config.TestFirebaseConnection()
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "Firebase connection test failed",
-			"error":   err.Error(),
-			"details": map[string]interface{}{
-				"firebase_enabled": true,
-				"messaging_client": config.GetMessagingClient() != nil,
-				"connection_error": err.Error(),
-			},
-		})
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Firebase connection test passed",
+		"message": "Firebase has been removed from this project - notifications are simulated",
 		"details": map[string]interface{}{
-			"firebase_enabled":  true,
-			"messaging_client":  config.GetMessagingClient() != nil,
-			"connection_status": "OK",
+			"firebase_enabled": false,
+			"simulation_mode":  true,
 		},
 	})
 }

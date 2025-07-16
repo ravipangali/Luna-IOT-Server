@@ -8,7 +8,6 @@ import (
 	"sync"
 	"syscall"
 
-	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
 	"luna_iot_server/internal/http/controllers"
@@ -37,14 +36,8 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize Firebase for push notifications
-	colors.PrintInfo("Initializing Firebase for push notifications...")
-	if err := config.InitializeFirebase(); err != nil {
-		colors.PrintWarning("Failed to initialize Firebase: %v", err)
-		colors.PrintWarning("Push notifications will be disabled")
-	} else {
-		colors.PrintSuccess("Firebase initialized successfully")
-	}
+	// Firebase removed - notifications will be simulated
+	colors.PrintInfo("Firebase removed - notifications will be simulated")
 
 	// Get ports from environment variables or use defaults
 	tcpPort := os.Getenv("TCP_PORT")
@@ -67,11 +60,7 @@ func main() {
 	colors.PrintServer("🌐", "HTTP Server configured for port %s (REST API Access)", httpPort)
 	colors.PrintSuccess("Database connection established successfully")
 	colors.PrintControl("Oil & Electricity control system enabled")
-	if config.IsFirebaseEnabled() {
-		colors.PrintSuccess("Push notifications enabled")
-	} else {
-		colors.PrintWarning("Push notifications disabled")
-	}
+	colors.PrintInfo("Firebase removed - notifications will be simulated")
 
 	// Create a wait group to manage both servers
 	var wg sync.WaitGroup
