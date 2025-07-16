@@ -329,6 +329,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			adminNotifications.POST("/send", notificationController.SendNotification)
 			adminNotifications.POST("/send-to-user/:user_id", notificationController.SendToUser)
 			adminNotifications.POST("/send-to-topic", notificationController.SendToTopic)
+			adminNotifications.DELETE("/:id", notificationController.DeleteNotification)
 		}
 
 		// Notification management routes (admin only)

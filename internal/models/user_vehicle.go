@@ -44,9 +44,8 @@ type UserVehicle struct {
 	IsActive  bool       `json:"is_active" gorm:"default:true"`
 	Notes     string     `json:"notes" gorm:"type:text"`
 
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships - using references tag to specify the exact column to reference
 	User          User    `json:"user,omitempty" gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

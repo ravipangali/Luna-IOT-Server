@@ -426,14 +426,14 @@ func (nds *NotificationDBService) DeleteNotification(notificationID uint) error 
 	}()
 
 	// Delete notification users first (due to foreign key constraint)
-	if err := tx.Where("notification_id = ?", notificationID).Delete(&models.NotificationUser{}).Error; err != nil {
+	if err := tx.Unscoped().Where("notification_id = ?", notificationID).Delete(&models.NotificationUser{}).Error; err != nil {
 		tx.Rollback()
 		colors.PrintError("Failed to delete notification associations: %v", err)
 		return err
 	}
 
-	// Delete notification
-	if err := tx.Delete(&models.Notification{}, notificationID).Error; err != nil {
+	// Delete notification permanently
+	if err := tx.Unscoped().Delete(&models.Notification{}, notificationID).Error; err != nil {
 		tx.Rollback()
 		colors.PrintError("Failed to delete notification: %v", err)
 		return err

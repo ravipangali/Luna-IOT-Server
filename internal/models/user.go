@@ -19,20 +19,19 @@ const (
 
 // User represents a system user
 type User struct {
-	ID        uint           `json:"id" gorm:"primarykey"`
-	Name      string         `json:"name" gorm:"size:100;not null" validate:"required,min=2,max=100"`
-	Phone     string         `json:"phone" gorm:"size:15;uniqueIndex" validate:"required,min=10,max=15"`
-	Email     string         `json:"email" gorm:"size:100;uniqueIndex" validate:"required,email"`
-	Password  string         `json:"password" gorm:"size:255;not null" validate:"required,min=6"`
-	Role      UserRole       `json:"role" gorm:"type:integer;not null;default:1" validate:"required,oneof=0 1"`
-	Image     string         `json:"image" gorm:"type:text"`
-	IsActive  bool           `json:"is_active" gorm:"default:false"`
-	Token     string         `json:"-" gorm:"size:255;uniqueIndex"` // Authentication token (hidden from JSON)
-	TokenExp  *time.Time     `json:"-" gorm:"index"`                // Token expiration time
-	FCMToken  string         `json:"fcm_token" gorm:"size:255"`     // Firebase Cloud Messaging token
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+	ID        uint       `json:"id" gorm:"primarykey"`
+	Name      string     `json:"name" gorm:"size:100;not null" validate:"required,min=2,max=100"`
+	Phone     string     `json:"phone" gorm:"size:15;uniqueIndex" validate:"required,min=10,max=15"`
+	Email     string     `json:"email" gorm:"size:100;uniqueIndex" validate:"required,email"`
+	Password  string     `json:"password" gorm:"size:255;not null" validate:"required,min=6"`
+	Role      UserRole   `json:"role" gorm:"type:integer;not null;default:1" validate:"required,oneof=0 1"`
+	Image     string     `json:"image" gorm:"type:text"`
+	IsActive  bool       `json:"is_active" gorm:"default:false"`
+	Token     string     `json:"-" gorm:"size:255;uniqueIndex"` // Authentication token (hidden from JSON)
+	TokenExp  *time.Time `json:"-" gorm:"index"`                // Token expiration time
+	FCMToken  string     `json:"fcm_token" gorm:"size:255"`     // Firebase Cloud Messaging token
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 
 	// Relationships - many-to-many with vehicles through UserVehicle
 	VehicleAccess []UserVehicle `json:"vehicle_access,omitempty" gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`

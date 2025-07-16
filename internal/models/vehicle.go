@@ -19,17 +19,16 @@ const (
 
 // Vehicle represents a vehicle in the tracking system
 type Vehicle struct {
-	IMEI        string         `json:"imei" gorm:"primaryKey;size:16;not null" validate:"required,len=16"`
-	RegNo       string         `json:"reg_no" gorm:"size:20;uniqueIndex;not null" validate:"required"`
-	Name        string         `json:"name" gorm:"size:100;not null" validate:"required"`
-	Odometer    float64        `json:"odometer" gorm:"type:decimal(10,2);default:0"`
-	Mileage     float64        `json:"mileage" gorm:"type:decimal(5,2)"`
-	MinFuel     float64        `json:"min_fuel" gorm:"type:decimal(5,2)"`
-	Overspeed   int            `json:"overspeed" gorm:"type:integer;default:60"`
-	VehicleType VehicleType    `json:"vehicle_type" gorm:"type:varchar(20);not null" validate:"required,oneof=bike car truck bus school_bus"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
+	IMEI        string      `json:"imei" gorm:"primaryKey;size:16;not null" validate:"required,len=16"`
+	RegNo       string      `json:"reg_no" gorm:"size:20;uniqueIndex;not null" validate:"required"`
+	Name        string      `json:"name" gorm:"size:100;not null" validate:"required"`
+	Odometer    float64     `json:"odometer" gorm:"type:decimal(10,2);default:0"`
+	Mileage     float64     `json:"mileage" gorm:"type:decimal(5,2)"`
+	MinFuel     float64     `json:"min_fuel" gorm:"type:decimal(5,2)"`
+	Overspeed   int         `json:"overspeed" gorm:"type:integer;default:60"`
+	VehicleType VehicleType `json:"vehicle_type" gorm:"type:varchar(20);not null" validate:"required,oneof=bike car truck bus school_bus"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 
 	// Relationship - Reference device by IMEI but no foreign key constraint
 	// This allows devices to be created independently

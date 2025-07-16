@@ -8,11 +8,10 @@ import (
 
 // DeviceModel represents a device model/type
 type DeviceModel struct {
-	ID        uint           `json:"id" gorm:"primarykey"`
-	Name      string         `json:"name" gorm:"size:100;not null;uniqueIndex" validate:"required,min=2,max=100"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+	ID        uint      `json:"id" gorm:"primarykey"`
+	Name      string    `json:"name" gorm:"size:100;not null;uniqueIndex" validate:"required,min=2,max=100"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships
 	Devices []Device `json:"devices,omitempty" gorm:"foreignKey:ModelID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`

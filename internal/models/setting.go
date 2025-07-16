@@ -14,7 +14,6 @@ type Setting struct {
 	MyPayBalance float64 `json:"my_pay_balance" gorm:"type:decimal(10,2);default:0"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 func (Setting) TableName() string {

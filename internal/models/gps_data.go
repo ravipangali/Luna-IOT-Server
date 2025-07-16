@@ -53,9 +53,8 @@ type GPSData struct {
 	ProtocolName string `json:"protocol_name"`
 	RawPacket    string `json:"raw_packet"`
 
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships - we'll use manual loading instead of foreign keys to avoid circular references
 	Device  Device  `json:"-" gorm:"-"`

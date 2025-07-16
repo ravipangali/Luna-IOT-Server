@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"luna_iot_server/internal/db"
+	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -333,5 +335,34 @@ func (nc *NotificationController) TestFirebaseConnection(c *gin.Context) {
 			"firebase_enabled": false,
 			"simulation_mode":  true,
 		},
+	})
+}
+
+// DeleteNotification permanently deletes a notification
+func (nc *NotificationController) DeleteNotification(c *gin.Context) {
+	notificationIDStr := c.Param("id")
+	notificationID, err := strconv.ParseUint(notificationIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid notification ID",
+		})
+		return
+	}
+
+	// Permanently delete the notification
+	database := db.GetDB()
+	if err := database.Unscoped().Delete(&models.Notification{}, notificationID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Failed to delete notification",
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Notification permanently deleted",
 	})
 }

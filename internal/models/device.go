@@ -23,16 +23,15 @@ const (
 
 // Device represents a GPS tracking device
 type Device struct {
-	ID          uint           `json:"id" gorm:"primarykey"`
-	IMEI        string         `json:"imei" gorm:"uniqueIndex;not null;size:16" validate:"required,len=16"`
-	SimNo       string         `json:"sim_no" gorm:"size:20" validate:"required"`
-	SimOperator SimOperator    `json:"sim_operator" gorm:"type:varchar(10);not null" validate:"required,oneof=Ncell Ntc"`
-	Protocol    Protocol       `json:"protocol" gorm:"type:varchar(10);not null;default:'GT06'" validate:"required"`
-	ICCID       string         `json:"iccid" gorm:"type:text"`
-	ModelID     *uint          `json:"model_id" gorm:"index"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
+	ID          uint        `json:"id" gorm:"primarykey"`
+	IMEI        string      `json:"imei" gorm:"uniqueIndex;not null;size:16" validate:"required,len=16"`
+	SimNo       string      `json:"sim_no" gorm:"size:20" validate:"required"`
+	SimOperator SimOperator `json:"sim_operator" gorm:"type:varchar(10);not null" validate:"required,oneof=Ncell Ntc"`
+	Protocol    Protocol    `json:"protocol" gorm:"type:varchar(10);not null;default:'GT06'" validate:"required"`
+	ICCID       string      `json:"iccid" gorm:"type:text"`
+	ModelID     *uint       `json:"model_id" gorm:"index"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 
 	// Relationships
 	Model DeviceModel `json:"model,omitempty" gorm:"foreignKey:ModelID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL"`
