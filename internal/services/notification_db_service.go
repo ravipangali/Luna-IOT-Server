@@ -26,6 +26,7 @@ type CreateNotificationRequest struct {
 	Body      string                 `json:"body" binding:"required"`
 	Type      string                 `json:"type"`
 	ImageURL  string                 `json:"image_url"`
+	ImageData string                 `json:"image_data"` // File path for uploaded images
 	Sound     string                 `json:"sound"`
 	Priority  string                 `json:"priority"`
 	Data      map[string]interface{} `json:"data"`
@@ -35,14 +36,15 @@ type CreateNotificationRequest struct {
 
 // UpdateNotificationRequest represents the request for updating a notification
 type UpdateNotificationRequest struct {
-	Title    string                 `json:"title" binding:"required"`
-	Body     string                 `json:"body" binding:"required"`
-	Type     string                 `json:"type"`
-	ImageURL string                 `json:"image_url"`
-	Sound    string                 `json:"sound"`
-	Priority string                 `json:"priority"`
-	Data     map[string]interface{} `json:"data"`
-	UserIDs  []uint                 `json:"user_ids" binding:"required"`
+	Title     string                 `json:"title" binding:"required"`
+	Body      string                 `json:"body" binding:"required"`
+	Type      string                 `json:"type"`
+	ImageURL  string                 `json:"image_url"`
+	ImageData string                 `json:"image_data"` // File path for uploaded images
+	Sound     string                 `json:"sound"`
+	Priority  string                 `json:"priority"`
+	Data      map[string]interface{} `json:"data"`
+	UserIDs   []uint                 `json:"user_ids" binding:"required"`
 }
 
 // NotificationResponse represents the response from notification operations
@@ -100,12 +102,13 @@ func (nds *NotificationDBService) CreateNotification(req *CreateNotificationRequ
 		req.Priority = "normal"
 	}
 
-	// Create notification
+	// Create the notification
 	notification := models.Notification{
 		Title:     req.Title,
 		Body:      req.Body,
 		Type:      req.Type,
 		ImageURL:  req.ImageURL,
+		ImageData: req.ImageData, // Add the image_data field
 		Sound:     req.Sound,
 		Priority:  req.Priority,
 		Data:      dataJSON,
@@ -244,11 +247,12 @@ func (nds *NotificationDBService) UpdateNotification(notificationID uint, req *U
 		}
 	}()
 
-	// Update notification
+	// Update notification fields
 	notification.Title = req.Title
 	notification.Body = req.Body
 	notification.Type = req.Type
 	notification.ImageURL = req.ImageURL
+	notification.ImageData = req.ImageData // Add the image_data field
 	notification.Sound = req.Sound
 	notification.Priority = req.Priority
 	notification.Data = dataJSON

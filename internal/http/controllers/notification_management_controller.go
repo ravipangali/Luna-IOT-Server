@@ -31,6 +31,7 @@ type CreateNotificationRequest struct {
 	Body            string                 `json:"body" binding:"required"`
 	Type            string                 `json:"type"`
 	ImageURL        string                 `json:"image_url"`
+	ImageData       string                 `json:"image_data"` // File path for uploaded images
 	Sound           string                 `json:"sound"`
 	Priority        string                 `json:"priority"`
 	Data            map[string]interface{} `json:"data"`
@@ -44,6 +45,7 @@ type UpdateNotificationRequest struct {
 	Body            string                 `json:"body" binding:"required"`
 	Type            string                 `json:"type"`
 	ImageURL        string                 `json:"image_url"`
+	ImageData       string                 `json:"image_data"` // File path for uploaded images
 	Sound           string                 `json:"sound"`
 	Priority        string                 `json:"priority"`
 	Data            map[string]interface{} `json:"data"`
@@ -147,6 +149,7 @@ func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) 
 		Body:      req.Body,
 		Type:      req.Type,
 		ImageURL:  req.ImageURL,
+		ImageData: req.ImageData, // Add the image_data field
 		Sound:     req.Sound,
 		Priority:  req.Priority,
 		Data:      req.Data,
@@ -177,12 +180,18 @@ func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) 
 
 	// If send immediately is requested, send the notification
 	if req.SendImmediately {
+		// Determine which image URL to use
+		imageURL := req.ImageURL
+		if req.ImageData != "" {
+			imageURL = req.ImageData // Use uploaded image URL
+		}
+
 		notificationData := &services.NotificationData{
 			Type:     req.Type,
 			Title:    req.Title,
 			Body:     req.Body,
 			Data:     req.Data,
-			ImageURL: req.ImageURL,
+			ImageURL: imageURL,
 			Sound:    req.Sound,
 			Priority: req.Priority,
 		}
@@ -233,14 +242,15 @@ func (nmc *NotificationManagementController) UpdateNotification(c *gin.Context) 
 
 	// Create update request for database service
 	dbReq := &services.UpdateNotificationRequest{
-		Title:    req.Title,
-		Body:     req.Body,
-		Type:     req.Type,
-		ImageURL: req.ImageURL,
-		Sound:    req.Sound,
-		Priority: req.Priority,
-		Data:     req.Data,
-		UserIDs:  req.UserIDs,
+		Title:     req.Title,
+		Body:      req.Body,
+		Type:      req.Type,
+		ImageURL:  req.ImageURL,
+		ImageData: req.ImageData, // Add the image_data field
+		Sound:     req.Sound,
+		Priority:  req.Priority,
+		Data:      req.Data,
+		UserIDs:   req.UserIDs,
 	}
 
 	// Update notification in database
@@ -266,12 +276,18 @@ func (nmc *NotificationManagementController) UpdateNotification(c *gin.Context) 
 
 	// If send immediately is requested, send the notification
 	if req.SendImmediately {
+		// Determine which image URL to use
+		imageURL := req.ImageURL
+		if req.ImageData != "" {
+			imageURL = req.ImageData // Use uploaded image URL
+		}
+
 		notificationData := &services.NotificationData{
 			Type:     req.Type,
 			Title:    req.Title,
 			Body:     req.Body,
 			Data:     req.Data,
-			ImageURL: req.ImageURL,
+			ImageURL: imageURL,
 			Sound:    req.Sound,
 			Priority: req.Priority,
 		}
@@ -404,9 +420,14 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		Title:    notification.Title,
 		Body:     notification.Body,
 		Data:     notification.GetDataMap(),
-		ImageURL: notification.ImageURL,
+		ImageURL: notification.ImageData, // Use image_data as primary image URL
 		Sound:    notification.Sound,
 		Priority: notification.Priority,
+	}
+
+	// If image_data is not available, fallback to image_url
+	if notification.ImageData == "" {
+		notificationData.ImageURL = notification.ImageURL
 	}
 
 	colors.PrintInfo("Prepared notification data: Title='%s', Body='%s', Type='%s'",

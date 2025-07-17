@@ -30,6 +30,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 	notificationController := controllers.NewNotificationController()
 	notificationManagementController := controllers.NewNotificationManagementController()
 	userSearchController := controllers.NewUserSearchController()
+	fileUploadController := controllers.NewFileUploadController()
 
 	// Use shared control controller if provided, otherwise create new one
 	var controlController *controllers.ControlController
@@ -342,6 +343,20 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			notificationManagement.PUT("/:id", notificationManagementController.UpdateNotification)
 			notificationManagement.DELETE("/:id", notificationManagementController.DeleteNotification)
 			notificationManagement.POST("/:id/send", notificationManagementController.SendNotification)
+		}
+
+		// File upload routes (admin only)
+		files := v1.Group("/files")
+		files.Use(middleware.AuthMiddleware(), middleware.AdminOnlyMiddleware())
+		{
+			// Upload notification image
+			files.POST("/notifications/upload", fileUploadController.UploadNotificationImage)
+
+			// Serve notification images (public access for viewing)
+			files.GET("/notifications/:filename", fileUploadController.ServeNotificationImage)
+
+			// Delete notification image
+			files.DELETE("/notifications/:filename", fileUploadController.DeleteNotificationImage)
 		}
 
 		// User search routes (admin only)

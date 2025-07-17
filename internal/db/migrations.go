@@ -37,6 +37,18 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
+	// Add FCM token column to users table if it doesn't exist
+	if err := addFCMTokenColumn(db); err != nil {
+		colors.PrintError("Failed to add FCM token column: %v", err)
+		return err
+	}
+
+	// Add image_data column to notifications table if it doesn't exist
+	if err := addImageDataColumnToNotifications(db); err != nil {
+		colors.PrintError("Failed to add image_data column: %v", err)
+		return err
+	}
+
 	// Fix the foreign key constraint between vehicles and devices
 	if err := fixVehicleDeviceConstraint(db); err != nil {
 		colors.PrintError("Failed to fix vehicle-device constraint: %v", err)
@@ -394,5 +406,33 @@ func addFCMTokenColumn(db *gorm.DB) error {
 	}
 
 	colors.PrintSuccess("✓ FCM token column added to users table")
+	return nil
+}
+
+// addImageDataColumnToNotifications adds image_data column to notifications table
+func addImageDataColumnToNotifications(db *gorm.DB) error {
+	colors.PrintInfo("Adding image_data column to notifications table...")
+
+	// Check if image_data column already exists
+	var columnExists int64
+	db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.columns 
+		WHERE table_name = 'notifications' 
+		AND column_name = 'image_data'
+	`).Count(&columnExists)
+
+	if columnExists > 0 {
+		colors.PrintInfo("image_data column already exists in notifications table")
+		return nil
+	}
+
+	// Add image_data column
+	if err := db.Exec("ALTER TABLE notifications ADD COLUMN image_data TEXT").Error; err != nil {
+		colors.PrintError("Failed to add image_data column: %v", err)
+		return fmt.Errorf("failed to add image_data column: %v", err)
+	}
+
+	colors.PrintSuccess("✓ image_data column added to notifications table")
 	return nil
 }

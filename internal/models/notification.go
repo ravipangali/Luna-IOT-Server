@@ -14,6 +14,7 @@ type Notification struct {
 	Body      string     `json:"body" gorm:"type:text;not null"`
 	Type      string     `json:"type" gorm:"size:50;default:'system_notification'"`
 	ImageURL  string     `json:"image_url" gorm:"type:text"`
+	ImageData string     `json:"image_data" gorm:"type:text"` // File path for uploaded images
 	Sound     string     `json:"sound" gorm:"size:50"`
 	Priority  string     `json:"priority" gorm:"size:20;default:'normal'"`
 	Data      string     `json:"data" gorm:"type:text"` // JSON string for additional data
