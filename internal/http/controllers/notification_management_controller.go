@@ -148,8 +148,8 @@ func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) 
 		Title:     req.Title,
 		Body:      req.Body,
 		Type:      req.Type,
-		ImageURL:  req.ImageURL,
-		ImageData: req.ImageData, // Add the image_data field
+		ImageURL:  req.ImageData, // Use uploaded file URL as image_url for display
+		ImageData: req.ImageData, // Also store in image_data
 		Sound:     req.Sound,
 		Priority:  req.Priority,
 		Data:      req.Data,
@@ -245,8 +245,8 @@ func (nmc *NotificationManagementController) UpdateNotification(c *gin.Context) 
 		Title:     req.Title,
 		Body:      req.Body,
 		Type:      req.Type,
-		ImageURL:  req.ImageURL,
-		ImageData: req.ImageData, // Add the image_data field
+		ImageURL:  req.ImageData, // Use uploaded file URL as image_url for display
+		ImageData: req.ImageData, // Also store in image_data
 		Sound:     req.Sound,
 		Priority:  req.Priority,
 		Data:      req.Data,
