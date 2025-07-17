@@ -116,6 +116,9 @@ func (nds *NotificationDBService) CreateNotification(req *CreateNotificationRequ
 		IsSent:    false, // Always start as not sent
 	}
 
+	// Debug logging
+	colors.PrintInfo("Saving notification to database with ImageURL: %s, ImageData: %s", notification.ImageURL, notification.ImageData)
+
 	// Start transaction
 	tx := database.Begin()
 	defer func() {

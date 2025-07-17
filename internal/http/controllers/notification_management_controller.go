@@ -157,6 +157,9 @@ func (nmc *NotificationManagementController) CreateNotification(c *gin.Context) 
 		CreatedBy: user.ID,
 	}
 
+	// Debug logging
+	colors.PrintInfo("Creating notification with ImageURL: %s, ImageData: %s", dbReq.ImageURL, dbReq.ImageData)
+
 	// Save notification to database
 	response, err := nmc.notificationDBService.CreateNotification(dbReq)
 	if err != nil {
