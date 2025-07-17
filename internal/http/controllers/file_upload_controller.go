@@ -35,7 +35,7 @@ func (fuc *FileUploadController) UploadNotificationImage(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, FileUploadResponse{
 			Success: false,
-			Message: "No image file provided,Error: " + err.Error(),
+			Message: "No image file provided. Error: " + err.Error(),
 		})
 		return
 	}
@@ -67,7 +67,7 @@ func (fuc *FileUploadController) UploadNotificationImage(c *gin.Context) {
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		c.JSON(http.StatusInternalServerError, FileUploadResponse{
 			Success: false,
-			Message: "Failed to create upload directory,Error: " + err.Error(),
+			Message: "Failed to create upload directory. Error: " + err.Error(),
 		})
 		return
 	}
@@ -98,7 +98,7 @@ func (fuc *FileUploadController) UploadNotificationImage(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, FileUploadResponse{
 			Success: false,
-			Message: "Failed to create file,Error: " + err.Error(),
+			Message: "Failed to create file. Error: " + err.Error(),
 		})
 		return
 	}
@@ -108,20 +108,20 @@ func (fuc *FileUploadController) UploadNotificationImage(c *gin.Context) {
 	if _, err := io.Copy(dst, file); err != nil {
 		c.JSON(http.StatusInternalServerError, FileUploadResponse{
 			Success: false,
-			Message: "Failed to save file,Error: " + err.Error(),
+			Message: "Failed to save file. Error: " + err.Error(),
 		})
 		return
 	}
 
-	// Generate file URL for API access
-	fileURL := fmt.Sprintf("/api/v1/files/notifications/%s", fileName)
+	// Generate file access URL for API access
+	fileAccessURL := fmt.Sprintf("/api/v1/files/notifications/%s", fileName)
 
 	c.JSON(http.StatusOK, FileUploadResponse{
 		Success:  true,
 		Message:  "Image uploaded successfully",
 		FileName: fileName,
 		FilePath: filePath,
-		FileURL:  fileURL,
+		FileURL:  fileAccessURL, // This is the access path to be stored in notification
 	})
 }
 
