@@ -30,8 +30,7 @@ func NewControlController() *ControlController {
 func (cc *ControlController) RegisterConnection(imei string, conn net.Conn) {
 	cc.activeConnections[imei] = conn
 	colors.PrintConnection("🔗", "Registered connection for device %s", imei)
-	colors.PrintDebug("Total active connections: %d", len(cc.activeConnections))
-	colors.PrintDebug("Active IMEIs: %v", cc.getRegisteredIMEIs())
+
 }
 
 // UnregisterConnection removes a TCP connection for a device

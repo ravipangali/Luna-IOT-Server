@@ -326,18 +326,6 @@ func (nc *NotificationController) SendToUser(c *gin.Context) {
 	})
 }
 
-// TestFirebaseConnection removed - Firebase has been removed from this project
-func (nc *NotificationController) TestFirebaseConnection(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Firebase has been removed from this project - notifications are simulated",
-		"details": map[string]interface{}{
-			"firebase_enabled": false,
-			"simulation_mode":  true,
-		},
-	})
-}
-
 // DeleteNotification permanently deletes a notification
 func (nc *NotificationController) DeleteNotification(c *gin.Context) {
 	notificationIDStr := c.Param("id")

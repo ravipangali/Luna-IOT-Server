@@ -27,9 +27,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Firebase removed - notifications will be simulated
-	colors.PrintInfo("Firebase removed - notifications will be simulated")
-
 	// Initialize global control controller
 	controlController = controllers.NewControlController()
 
