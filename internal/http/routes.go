@@ -376,7 +376,8 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 		testNotifications := v1.Group("/test/notifications")
 		testNotifications.Use(middleware.AuthMiddleware())
 		{
-			// Firebase test endpoint removed
+			// Test alarm notification endpoint
+			testNotifications.POST("/alarm", notificationManagementController.TestAlarmNotification)
 		}
 	}
 

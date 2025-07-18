@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/services"
@@ -465,6 +466,72 @@ func (nmc *NotificationManagementController) SendNotificationToDevice(c *gin.Con
 	c.JSON(http.StatusOK, gin.H{
 		"success":          response.Success,
 		"message":          "Notification sent successfully",
+		"notification_id":  response.NotificationID,
+		"tokens_sent":      response.TokensSent,
+		"tokens_delivered": response.TokensDelivered,
+		"tokens_failed":    response.TokensFailed,
+		"details":          response.Details,
+	})
+}
+
+// TestAlarmNotification sends a test alarm notification
+func (nmc *NotificationManagementController) TestAlarmNotification(c *gin.Context) {
+	var req struct {
+		Title  string   `json:"title" binding:"required"`
+		Body   string   `json:"body" binding:"required"`
+		Tokens []string `json:"tokens" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		colors.PrintError("Invalid test alarm notification request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Create Ravipangali service and send alarm notification
+	ravipangaliService := services.NewRavipangaliService()
+	response, err := ravipangaliService.SendPushNotification(
+		req.Title,
+		req.Body,
+		req.Tokens,
+		"", // No image for test
+		map[string]interface{}{
+			"test_alarm": true,
+			"timestamp":  time.Now().Unix(),
+		},
+		"urgent", // Force urgent priority
+		"alarm",  // Force alarm type
+		"alarm",  // Force alarm sound
+	)
+
+	if err != nil {
+		colors.PrintError("Failed to send test alarm notification: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to send alarm notification",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if !response.Success {
+		colors.PrintError("Ravipangali API returned failure: %s", response.Error)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   response.Error,
+			"message": response.Message,
+		})
+		return
+	}
+
+	colors.PrintSuccess("Test alarm notification sent to %d devices", len(req.Tokens))
+	c.JSON(http.StatusOK, gin.H{
+		"success":          response.Success,
+		"message":          "Test alarm notification sent successfully",
 		"notification_id":  response.NotificationID,
 		"tokens_sent":      response.TokensSent,
 		"tokens_delivered": response.TokensDelivered,

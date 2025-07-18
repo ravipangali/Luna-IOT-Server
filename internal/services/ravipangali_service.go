@@ -33,6 +33,10 @@ type RavipangaliPayload struct {
 	Sound    string                 `json:"sound,omitempty"` // Add notification sound
 	// Add flag to send only data payload (no notification payload)
 	DataOnly bool `json:"data_only,omitempty"`
+	// Add alarm-specific fields
+	IsAlarm    bool `json:"is_alarm,omitempty"`   // Flag for alarm notifications
+	Urgent     bool `json:"urgent,omitempty"`     // Flag for urgent notifications
+	Persistent bool `json:"persistent,omitempty"` // Flag for persistent notifications
 }
 
 // RavipangaliResponse represents the response from Ravipangali API
@@ -114,6 +118,15 @@ func (rs *RavipangaliService) SendPushNotification(
 		DataOnly: true, // Send only data payload to prevent Firebase automatic display
 	}
 
+	// Handle alarm notifications specially
+	if notificationType == "alarm" {
+		payload.IsAlarm = true
+		payload.Urgent = true
+		payload.Persistent = true
+		payload.Priority = "urgent" // Force urgent priority for alarms
+		payload.Sound = "alarm"     // Force alarm sound for alarms
+	}
+
 	// If DataOnly is true, include notification content in data payload
 	if payload.DataOnly {
 		if payload.Data == nil {
@@ -126,6 +139,15 @@ func (rs *RavipangaliService) SendPushNotification(
 		payload.Data["priority"] = priority
 		payload.Data["type"] = notificationType
 		payload.Data["sound"] = sound
+
+		// Add alarm-specific data
+		if notificationType == "alarm" {
+			payload.Data["is_alarm"] = true
+			payload.Data["urgent"] = true
+			payload.Data["persistent"] = true
+			payload.Data["requires_acknowledgment"] = true
+		}
+
 		// Keep original data fields
 		for key, value := range data {
 			payload.Data[key] = value
