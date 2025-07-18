@@ -29,6 +29,8 @@ type RavipangaliPayload struct {
 	ImageURL string                 `json:"image_url,omitempty"`
 	Data     map[string]interface{} `json:"data,omitempty"`
 	Priority string                 `json:"priority"`
+	// Add flag to send only data payload (no notification payload)
+	DataOnly bool `json:"data_only,omitempty"`
 }
 
 // RavipangaliResponse represents the response from Ravipangali API
@@ -103,6 +105,23 @@ func (rs *RavipangaliService) SendPushNotification(
 		ImageURL: imageURL,
 		Data:     data,
 		Priority: priority,
+		DataOnly: true, // Send only data payload to prevent Firebase automatic display
+	}
+
+	// If DataOnly is true, include notification content in data payload
+	if payload.DataOnly {
+		if payload.Data == nil {
+			payload.Data = make(map[string]interface{})
+		}
+		// Include notification content in data payload
+		payload.Data["title"] = title
+		payload.Data["body"] = body
+		payload.Data["image_url"] = imageURL
+		payload.Data["priority"] = priority
+		// Keep original data fields
+		for key, value := range data {
+			payload.Data[key] = value
+		}
 	}
 
 	// Marshal payload to JSON
