@@ -352,11 +352,15 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			// Upload notification image
 			files.POST("/notifications/upload", fileUploadController.UploadNotificationImage)
 
-			// Serve notification images (public access for viewing)
-			files.GET("/notifications/:filename", fileUploadController.ServeNotificationImage)
-
 			// Delete notification image
 			files.DELETE("/notifications/:filename", fileUploadController.DeleteNotificationImage)
+		}
+
+		// Public file serving routes (no authentication required)
+		publicFiles := v1.Group("/public/files")
+		{
+			// Serve notification images (public access for viewing)
+			publicFiles.GET("/notifications/:filename", fileUploadController.ServeNotificationImage)
 		}
 
 		// User search routes (admin only)

@@ -137,8 +137,8 @@ func (fuc *FileUploadController) UploadNotificationImage(c *gin.Context) {
 	}
 	fmt.Printf("File copied successfully\n")
 
-	// Generate file access URL for API access
-	fileAccessURL := fmt.Sprintf("/api/v1/files/notifications/%s", fileName)
+	// Generate file access URL for API access (using public endpoint)
+	fileAccessURL := fmt.Sprintf("/api/v1/public/files/notifications/%s", fileName)
 
 	fmt.Printf("Generated file access URL: %s\n", fileAccessURL)
 	fmt.Printf("Upload completed successfully\n")
