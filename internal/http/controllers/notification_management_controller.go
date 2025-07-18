@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/services"
 	"luna_iot_server/pkg/colors"
@@ -345,7 +344,7 @@ func (nmc *NotificationManagementController) DeleteNotification(c *gin.Context) 
 	})
 }
 
-// SendNotification sends a notification immediately
+// SendNotification sends a notification immediately via Ravipangali API
 func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -359,88 +358,12 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		return
 	}
 
-	colors.PrintInfo("Starting to send notification with ID: %d", id)
+	colors.PrintInfo("Starting to send notification with ID: %d via Ravipangali API", id)
 
-	// Get notification from database
-	colors.PrintInfo("Fetching notification %d from database", id)
-	notification, err := nmc.notificationDBService.GetNotificationByID(uint(id))
+	// Use the new backend-driven approach
+	sendResponse, err := nmc.notificationService.SendNotificationByID(uint(id))
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			colors.PrintError("Notification %d not found in database", id)
-			c.JSON(http.StatusNotFound, gin.H{
-				"success": false,
-				"error":   "Notification not found",
-				"message": "The requested notification does not exist",
-			})
-			return
-		}
-		colors.PrintError("Database error getting notification %d: %v", id, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to retrieve notification",
-			"message": err.Error(),
-		})
-		return
-	}
-
-	colors.PrintInfo("Successfully retrieved notification %d: Title='%s', Body='%s'",
-		id, notification.Title, notification.Body)
-
-	// Get user IDs for this notification
-	colors.PrintInfo("Fetching user IDs for notification %d", id)
-	var users []models.User
-	if err := db.GetDB().Model(&notification).Association("Users").Find(&users); err != nil {
-		colors.PrintError("Failed to get users for notification %d: %v", id, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to get notification users",
-			"message": err.Error(),
-		})
-		return
-	}
-
-	// Extract user IDs from the users slice
-	var userIDs []uint
-	for _, user := range users {
-		userIDs = append(userIDs, user.ID)
-	}
-
-	colors.PrintInfo("Found %d users for notification %d: %v", len(userIDs), id, userIDs)
-
-	if len(userIDs) == 0 {
-		colors.PrintWarning("No users found for notification %d", id)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "No users assigned",
-			"message": "No users are assigned to this notification",
-		})
-		return
-	}
-
-	// Prepare notification data
-	notificationData := &services.NotificationData{
-		Type:     notification.Type,
-		Title:    notification.Title,
-		Body:     notification.Body,
-		Data:     notification.GetDataMap(),
-		ImageURL: notification.ImageData, // Use image_data as primary image URL
-		Sound:    notification.Sound,
-		Priority: notification.Priority,
-	}
-
-	// If image_data is not available, fallback to image_url
-	if notification.ImageData == "" {
-		notificationData.ImageURL = notification.ImageURL
-	}
-
-	colors.PrintInfo("Prepared notification data: Title='%s', Body='%s', Type='%s'",
-		notificationData.Title, notificationData.Body, notificationData.Type)
-
-	// Send notification
-	colors.PrintInfo("Sending notification %d to %d users", id, len(userIDs))
-	sendResponse, err := nmc.notificationService.SendToMultipleUsers(userIDs, notificationData)
-	if err != nil {
-		colors.PrintError("Failed to send notification %d: %v", id, err)
+		colors.PrintError("Failed to send notification %d via Ravipangali: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to send notification",
@@ -449,7 +372,6 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		return
 	}
 
-	colors.PrintInfo("Notification send response: %+v", sendResponse)
 	if !sendResponse.Success {
 		colors.PrintError("Notification send failed: %s", sendResponse.Message)
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -460,16 +382,89 @@ func (nmc *NotificationManagementController) SendNotification(c *gin.Context) {
 		return
 	}
 
-	// Mark notification as sent
-	colors.PrintInfo("Marking notification %d as sent", id)
-	if err := nmc.notificationDBService.MarkNotificationAsSent(uint(id)); err != nil {
-		colors.PrintError("Failed to mark notification as sent: %v", err)
-	}
-
-	colors.PrintSuccess("Notification sent successfully with ID: %d", id)
+	colors.PrintSuccess("Notification sent successfully with ID: %d via Ravipangali API", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Notification sent successfully",
+		"message": "Notification sent successfully via Ravipangali API",
 		"data":    sendResponse,
+	})
+}
+
+// SendNotificationToDevice sends notification directly to device tokens via Ravipangali
+func (nmc *NotificationManagementController) SendNotificationToDevice(c *gin.Context) {
+	var req struct {
+		Title    string                 `json:"title" binding:"required"`
+		Body     string                 `json:"body" binding:"required"`
+		Tokens   []string               `json:"tokens" binding:"required"`
+		ImageURL string                 `json:"image_url,omitempty"`
+		Data     map[string]interface{} `json:"data,omitempty"`
+		Priority string                 `json:"priority,omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		colors.PrintError("Invalid send notification to device request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "Invalid request format",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if len(req.Tokens) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "No tokens provided",
+			"message": "At least one FCM token is required",
+		})
+		return
+	}
+
+	// Set default priority if not provided
+	if req.Priority == "" {
+		req.Priority = "normal"
+	}
+
+	// Create Ravipangali service and send notification
+	ravipangaliService := services.NewRavipangaliService()
+	response, err := ravipangaliService.SendPushNotification(
+		req.Title,
+		req.Body,
+		req.Tokens,
+		req.ImageURL,
+		req.Data,
+		req.Priority,
+	)
+
+	if err != nil {
+		colors.PrintError("Failed to send notification to devices: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to send notification",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if !response.Success {
+		colors.PrintError("Ravipangali API returned failure: %s", response.Error)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   response.Error,
+			"message": response.Message,
+		})
+		return
+	}
+
+	colors.PrintSuccess("Notification sent to %d devices via Ravipangali API", len(req.Tokens))
+	c.JSON(http.StatusOK, gin.H{
+		"success":          response.Success,
+		"message":          "Notification sent successfully",
+		"notification_id":  response.NotificationID,
+		"tokens_sent":      response.TokensSent,
+		"tokens_delivered": response.TokensDelivered,
+		"tokens_failed":    response.TokensFailed,
+		"details":          response.Details,
 	})
 }

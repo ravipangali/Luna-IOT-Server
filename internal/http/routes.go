@@ -343,6 +343,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			notificationManagement.PUT("/:id", notificationManagementController.UpdateNotification)
 			notificationManagement.DELETE("/:id", notificationManagementController.DeleteNotification)
 			notificationManagement.POST("/:id/send", notificationManagementController.SendNotification)
+			notificationManagement.POST("/send-device", notificationManagementController.SendNotificationToDevice)
 		}
 
 		// File upload routes (admin only)
