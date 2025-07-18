@@ -29,6 +29,8 @@ type RavipangaliPayload struct {
 	ImageURL string                 `json:"image_url,omitempty"`
 	Data     map[string]interface{} `json:"data,omitempty"`
 	Priority string                 `json:"priority"`
+	Type     string                 `json:"type,omitempty"`  // Add notification type
+	Sound    string                 `json:"sound,omitempty"` // Add notification sound
 	// Add flag to send only data payload (no notification payload)
 	DataOnly bool `json:"data_only,omitempty"`
 }
@@ -59,6 +61,8 @@ func (rs *RavipangaliService) SendPushNotification(
 	imageURL string,
 	data map[string]interface{},
 	priority string,
+	notificationType string,
+	sound string,
 ) (*RavipangaliResponse, error) {
 	// Get configuration from environment variables
 	appID := os.Getenv("RP_FIREBASE_APP_ID")
@@ -105,6 +109,8 @@ func (rs *RavipangaliService) SendPushNotification(
 		ImageURL: imageURL,
 		Data:     data,
 		Priority: priority,
+		Type:     notificationType,
+		Sound:    sound,
 		DataOnly: true, // Send only data payload to prevent Firebase automatic display
 	}
 
@@ -118,6 +124,8 @@ func (rs *RavipangaliService) SendPushNotification(
 		payload.Data["body"] = body
 		payload.Data["image_url"] = imageURL
 		payload.Data["priority"] = priority
+		payload.Data["type"] = notificationType
+		payload.Data["sound"] = sound
 		// Keep original data fields
 		for key, value := range data {
 			payload.Data[key] = value

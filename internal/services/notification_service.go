@@ -68,6 +68,8 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 		notification.ImageURL,
 		notification.Data,
 		notification.Priority,
+		notification.Type,
+		notification.Sound,
 	)
 
 	if err != nil {
@@ -136,6 +138,8 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 		notification.ImageURL,
 		notification.Data,
 		notification.Priority,
+		notification.Type,
+		notification.Sound,
 	)
 
 	if err != nil {
