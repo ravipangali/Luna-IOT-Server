@@ -399,6 +399,8 @@ func (nmc *NotificationManagementController) SendNotificationToDevice(c *gin.Con
 		ImageURL string                 `json:"image_url,omitempty"`
 		Data     map[string]interface{} `json:"data,omitempty"`
 		Priority string                 `json:"priority,omitempty"`
+		Type     string                 `json:"type,omitempty"`
+		Sound    string                 `json:"sound,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -435,6 +437,8 @@ func (nmc *NotificationManagementController) SendNotificationToDevice(c *gin.Con
 		req.ImageURL,
 		req.Data,
 		req.Priority,
+		req.Type,
+		req.Sound,
 	)
 
 	if err != nil {
