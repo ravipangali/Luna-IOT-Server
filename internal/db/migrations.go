@@ -73,6 +73,12 @@ func MigrateDB(db *gorm.DB) error {
 		return err
 	}
 
+	// Update notification image URLs to use new public endpoint
+	if err := updateNotificationImageURLs(db); err != nil {
+		colors.PrintError("Failed to update notification image URLs: %v", err)
+		return err
+	}
+
 	colors.PrintSuccess("Database migrations completed successfully")
 	return nil
 }
@@ -434,5 +440,39 @@ func addImageDataColumnToNotifications(db *gorm.DB) error {
 	}
 
 	colors.PrintSuccess("✓ image_data column added to notifications table")
+	return nil
+}
+
+// updateNotificationImageURLs updates existing notification image URLs to use the new public endpoint
+func updateNotificationImageURLs(db *gorm.DB) error {
+	colors.PrintInfo("Updating notification image URLs to use new public endpoint...")
+
+	// Update image_data column
+	result := db.Exec(`
+		UPDATE notifications 
+		SET image_data = REPLACE(image_data, '/api/v1/files/notifications/', '/api/v1/public/files/notifications/')
+		WHERE image_data LIKE '%/api/v1/files/notifications/%'
+	`)
+
+	if result.Error != nil {
+		colors.PrintWarning("Could not update image_data URLs: %v", result.Error)
+	} else {
+		colors.PrintInfo("Updated %d image_data URLs", result.RowsAffected)
+	}
+
+	// Update image_url column
+	result = db.Exec(`
+		UPDATE notifications 
+		SET image_url = REPLACE(image_url, '/api/v1/files/notifications/', '/api/v1/public/files/notifications/')
+		WHERE image_url LIKE '%/api/v1/files/notifications/%'
+	`)
+
+	if result.Error != nil {
+		colors.PrintWarning("Could not update image_url URLs: %v", result.Error)
+	} else {
+		colors.PrintInfo("Updated %d image_url URLs", result.RowsAffected)
+	}
+
+	colors.PrintSuccess("✓ Notification image URLs updated to use public endpoint")
 	return nil
 }
