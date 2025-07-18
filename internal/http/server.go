@@ -1,10 +1,8 @@
 package http
 
 import (
-	"crypto/tls"
 	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/pkg/colors"
-	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -93,62 +91,7 @@ func NewServerWithController(port string, sharedController *controllers.ControlC
 func (s *Server) Start() error {
 	colors.PrintServer("🌐", "HTTP REST API Server starting on port %s", s.port)
 	colors.PrintServer("🔗", "WebSocket endpoint available at /ws for real-time data")
-
-	// Check if HTTPS is enabled
-	if os.Getenv("HTTPS_ENABLED") == "true" {
-		return s.startHTTPS()
-	}
-
 	return s.router.Run(":" + s.port)
-}
-
-// startHTTPS starts the server with HTTPS
-func (s *Server) startHTTPS() error {
-	certFile := os.Getenv("SSL_CERT_FILE")
-	keyFile := os.Getenv("SSL_KEY_FILE")
-
-	if certFile == "" || keyFile == "" {
-		colors.PrintError("SSL_CERT_FILE and SSL_KEY_FILE environment variables must be set for HTTPS")
-		colors.PrintWarning("Falling back to HTTP mode")
-		return s.router.Run(":" + s.port)
-	}
-
-	// Check if certificate files exist
-	if _, err := os.Stat(certFile); os.IsNotExist(err) {
-		colors.PrintError("SSL certificate file not found: %s", certFile)
-		colors.PrintWarning("Falling back to HTTP mode")
-		return s.router.Run(":" + s.port)
-	}
-
-	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-		colors.PrintError("SSL key file not found: %s", keyFile)
-		colors.PrintWarning("Falling back to HTTP mode")
-		return s.router.Run(":" + s.port)
-	}
-
-	// Create TLS config
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-		},
-	}
-
-	// Create HTTP server with TLS config
-	server := &http.Server{
-		Addr:      ":" + s.port,
-		Handler:   s.router,
-		TLSConfig: tlsConfig,
-	}
-
-	colors.PrintServer("🔒", "HTTPS server starting on port %s", s.port)
-	colors.PrintServer("📜", "Using SSL certificate: %s", certFile)
-	colors.PrintServer("🔑", "Using SSL key: %s", keyFile)
-
-	return server.ListenAndServeTLS(certFile, keyFile)
 }
 
 // CORSMiddleware handles Cross-Origin Resource Sharing
