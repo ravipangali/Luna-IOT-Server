@@ -125,6 +125,14 @@ func (rs *RavipangaliService) SendPushNotification(
 		payload.Persistent = true
 		payload.Priority = "urgent" // Force urgent priority for alarms
 		payload.Sound = "alarm"     // Force alarm sound for alarms
+	} else if notificationType == "alert" {
+		// Alert notifications use custom sound but are not persistent
+		payload.Priority = "high" // High priority for alerts
+		payload.Sound = "alert"   // Use alert sound
+	} else {
+		// Default notification type
+		payload.Type = "notification"
+		payload.Sound = "default" // Use system default sound
 	}
 
 	// If DataOnly is true, include notification content in data payload
@@ -146,6 +154,13 @@ func (rs *RavipangaliService) SendPushNotification(
 			payload.Data["urgent"] = true
 			payload.Data["persistent"] = true
 			payload.Data["requires_acknowledgment"] = true
+		} else if notificationType == "alert" {
+			payload.Data["is_alert"] = true
+			payload.Data["custom_sound"] = true
+		} else {
+			// Default notification type
+			payload.Data["is_notification"] = true
+			payload.Data["system_sound"] = true
 		}
 
 		// Keep original data fields
