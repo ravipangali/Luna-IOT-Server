@@ -53,7 +53,7 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 
 	colors.PrintInfo("🚗 Vehicle found: %s (%s)", vehicle.Name, vehicle.RegNo)
 
-	// Get the latest valid GPS data from database for comparison
+	// Get the latest valid GPS data from database for comparison (this data is already saved)
 	var lastGPSData models.GPSData
 	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != ''", gpsData.IMEI).
 		Order("timestamp DESC").

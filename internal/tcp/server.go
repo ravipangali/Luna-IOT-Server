@@ -280,22 +280,26 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
 		gpsData := s.buildGPSData(packet, deviceIMEI)
 
+		// STEP 1: Check and send vehicle notifications FIRST (before saving to database)
+		var notificationError error
+		if s.vehicleNotificationService != nil {
+			colors.PrintInfo("🔔 Checking notifications BEFORE saving to database")
+			notificationError = s.vehicleNotificationService.CheckAndSendVehicleNotifications(&gpsData)
+			if notificationError != nil {
+				colors.PrintError("❌ Notification check failed: %v - NOT saving to database", notificationError)
+				return // Don't save to database if notification check fails
+			}
+			colors.PrintSuccess("✅ Notification check completed successfully")
+		}
+
+		// STEP 2: Save to database only if notification check succeeded
 		if err := db.GetDB().Create(&gpsData).Error; err != nil {
 			colors.PrintError("Error saving GPS data: %v", err)
 		} else {
 			colors.PrintSuccess("✅ GPS data saved for device %s (Lat=%.12f, Lng=%.12f)",
 				deviceIMEI, lat, lng)
 
-			// Check and send vehicle notifications
-			if s.vehicleNotificationService != nil {
-				go func() {
-					if err := s.vehicleNotificationService.CheckAndSendVehicleNotifications(&gpsData); err != nil {
-						colors.PrintError("Failed to send vehicle notifications: %v", err)
-					}
-				}()
-			}
-
-			// Broadcast the new full GPS data object over WebSocket
+			// STEP 3: Broadcast the new full GPS data object over WebSocket
 			if http.WSHub != nil {
 				go http.WSHub.BroadcastFullGPSUpdate(&gpsData)
 			}
@@ -419,21 +423,25 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 			}
 		}
 
+		// STEP 1: Check and send vehicle notifications FIRST (before saving to database)
+		var notificationError error
+		if s.vehicleNotificationService != nil {
+			colors.PrintInfo("🔔 Checking status notifications BEFORE saving to database")
+			notificationError = s.vehicleNotificationService.CheckAndSendVehicleNotifications(&statusData)
+			if notificationError != nil {
+				colors.PrintError("❌ Status notification check failed: %v - NOT saving to database", notificationError)
+				return // Don't save to database if notification check fails
+			}
+			colors.PrintSuccess("✅ Status notification check completed successfully")
+		}
+
+		// STEP 2: Save to database only if notification check succeeded
 		if err := db.GetDB().Create(&statusData).Error; err != nil {
 			colors.PrintError("Error saving status data: %v", err)
 		} else {
 			colors.PrintSuccess("Status data saved for device %s", deviceIMEI)
 
-			// Check and send vehicle notifications for status changes
-			if s.vehicleNotificationService != nil {
-				go func() {
-					if err := s.vehicleNotificationService.CheckAndSendVehicleNotifications(&statusData); err != nil {
-						colors.PrintError("Failed to send vehicle notifications: %v", err)
-					}
-				}()
-			}
-
-			// Broadcast status update as a full GPS update to WebSocket clients
+			// STEP 3: Broadcast status update as a full GPS update to WebSocket clients
 			if http.WSHub != nil {
 				go http.WSHub.BroadcastFullGPSUpdate(&statusData)
 			}
