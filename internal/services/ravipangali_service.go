@@ -115,7 +115,7 @@ func (rs *RavipangaliService) SendPushNotification(
 		Priority: priority,
 		Type:     notificationType,
 		Sound:    sound,
-		DataOnly: true, // Send only data payload to prevent Firebase automatic display
+		DataOnly: false, // Changed from true to false to allow Firebase to display notifications
 	}
 
 	// Handle alarm notifications specially
@@ -135,38 +135,36 @@ func (rs *RavipangaliService) SendPushNotification(
 		payload.Sound = "default" // Use system default sound
 	}
 
-	// If DataOnly is true, include notification content in data payload
-	if payload.DataOnly {
-		if payload.Data == nil {
-			payload.Data = make(map[string]interface{})
-		}
-		// Include notification content in data payload
-		payload.Data["title"] = title
-		payload.Data["body"] = body
-		payload.Data["image_url"] = imageURL
-		payload.Data["priority"] = priority
-		payload.Data["type"] = notificationType
-		payload.Data["sound"] = sound
+	// Include notification content in data payload for app handling
+	if payload.Data == nil {
+		payload.Data = make(map[string]interface{})
+	}
+	// Include notification content in data payload
+	payload.Data["title"] = title
+	payload.Data["body"] = body
+	payload.Data["image_url"] = imageURL
+	payload.Data["priority"] = priority
+	payload.Data["type"] = notificationType
+	payload.Data["sound"] = sound
 
-		// Add alarm-specific data
-		if notificationType == "alarm" {
-			payload.Data["is_alarm"] = true
-			payload.Data["urgent"] = true
-			payload.Data["persistent"] = true
-			payload.Data["requires_acknowledgment"] = true
-		} else if notificationType == "alert" {
-			payload.Data["is_alert"] = true
-			payload.Data["custom_sound"] = true
-		} else {
-			// Default notification type
-			payload.Data["is_notification"] = true
-			payload.Data["system_sound"] = true
-		}
+	// Add alarm-specific data
+	if notificationType == "alarm" {
+		payload.Data["is_alarm"] = true
+		payload.Data["urgent"] = true
+		payload.Data["persistent"] = true
+		payload.Data["requires_acknowledgment"] = true
+	} else if notificationType == "alert" {
+		payload.Data["is_alert"] = true
+		payload.Data["custom_sound"] = true
+	} else {
+		// Default notification type
+		payload.Data["is_notification"] = true
+		payload.Data["system_sound"] = true
+	}
 
-		// Keep original data fields
-		for key, value := range data {
-			payload.Data[key] = value
-		}
+	// Keep original data fields
+	for key, value := range data {
+		payload.Data[key] = value
 	}
 
 	// Marshal payload to JSON

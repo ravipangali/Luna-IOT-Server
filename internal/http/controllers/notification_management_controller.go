@@ -2,9 +2,11 @@ package controllers
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
+	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/services"
 	"luna_iot_server/pkg/colors"
@@ -537,5 +539,97 @@ func (nmc *NotificationManagementController) TestAlarmNotification(c *gin.Contex
 		"tokens_delivered": response.TokensDelivered,
 		"tokens_failed":    response.TokensFailed,
 		"details":          response.Details,
+	})
+}
+
+// TestNotificationSystem tests the entire notification system
+func (nmc *NotificationManagementController) TestNotificationSystem(c *gin.Context) {
+	// Get current user from context
+	userInterface, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "Unauthorized",
+			"message": "User not authenticated",
+		})
+		return
+	}
+	user := userInterface.(*models.User)
+
+	// Test 1: Check if user has FCM token
+	var testUser models.User
+	database := db.GetDB()
+	if err := database.First(&testUser, user.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch user",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Test 2: Check Ravipangali configuration
+	appID := os.Getenv("RP_FIREBASE_APP_ID")
+	email := os.Getenv("RP_ACCOUNT_EMAIL")
+	password := os.Getenv("RP_ACCOUNT_PASSWORD")
+
+	configStatus := "OK"
+	if appID == "" || email == "" || password == "" {
+		configStatus = "MISSING_CONFIG"
+	}
+
+	// Test 3: Try to send a test notification if user has FCM token
+	var notificationResult map[string]interface{}
+	if testUser.FCMToken != "" && len(testUser.FCMToken) >= 100 {
+		ravipangaliService := services.NewRavipangaliService()
+		response, err := ravipangaliService.SendPushNotification(
+			"Test Notification",
+			"This is a test notification from Luna IoT",
+			[]string{testUser.FCMToken},
+			"",
+			map[string]interface{}{
+				"test_notification": true,
+				"timestamp":         time.Now().Unix(),
+			},
+			"normal",
+			"notification",
+			"default",
+		)
+
+		if err != nil {
+			notificationResult = map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			}
+		} else {
+			notificationResult = map[string]interface{}{
+				"success":          response.Success,
+				"message":          response.Message,
+				"tokens_sent":      response.TokensSent,
+				"tokens_delivered": response.TokensDelivered,
+				"tokens_failed":    response.TokensFailed,
+			}
+		}
+	} else {
+		notificationResult = map[string]interface{}{
+			"success": false,
+			"error":   "No valid FCM token found",
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Notification system test completed",
+		"tests": gin.H{
+			"user_has_fcm_token": testUser.FCMToken != "" && len(testUser.FCMToken) >= 100,
+			"fcm_token_length":   len(testUser.FCMToken),
+			"ravipangali_config": configStatus,
+			"notification_test":  notificationResult,
+		},
+		"user_info": gin.H{
+			"id":    testUser.ID,
+			"name":  testUser.Name,
+			"phone": testUser.Phone,
+		},
 	})
 }

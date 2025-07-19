@@ -60,6 +60,17 @@ func (ns *NotificationService) SendToUser(userID uint, notification *Notificatio
 		}, fmt.Errorf("user has no FCM token")
 	}
 
+	// Validate FCM token format (basic validation)
+	if len(user.FCMToken) < 100 {
+		colors.PrintWarning("User %d (%s) has invalid FCM token (too short)", userID, user.Name)
+		return &NotificationServiceResponse{
+			Success: false,
+			Message: "User has invalid FCM token",
+		}, fmt.Errorf("user has invalid FCM token")
+	}
+
+	colors.PrintInfo("Sending notification to user %d (%s) with FCM token: %s...", userID, user.Name, user.FCMToken[:20])
+
 	// Send via Ravipangali API
 	response, err := ns.ravipangaliService.SendPushNotification(
 		notification.Title,
@@ -112,23 +123,31 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 		}, err
 	}
 
-	// Extract FCM tokens
+	// Extract FCM tokens with validation
 	var tokens []string
+	var validUsers []string
+	var invalidUsers []string
+
 	for _, user := range users {
-		if user.FCMToken != "" {
+		if user.FCMToken != "" && len(user.FCMToken) >= 100 {
 			tokens = append(tokens, user.FCMToken)
+			validUsers = append(validUsers, user.Name)
+			colors.PrintInfo("User %d (%s) has valid FCM token", user.ID, user.Name)
 		} else {
-			colors.PrintWarning("User %d (%s) has no FCM token", user.ID, user.Name)
+			invalidUsers = append(invalidUsers, user.Name)
+			colors.PrintWarning("User %d (%s) has no FCM token or invalid token", user.ID, user.Name)
 		}
 	}
 
 	if len(tokens) == 0 {
-		colors.PrintWarning("No FCM tokens found for any of the %d users", len(userIDs))
+		colors.PrintWarning("No valid FCM tokens found for any of the %d users", len(userIDs))
 		return &NotificationServiceResponse{
 			Success: false,
-			Message: "No FCM tokens found for any users",
-		}, fmt.Errorf("no FCM tokens found")
+			Message: "No valid FCM tokens found for any users",
+		}, fmt.Errorf("no valid FCM tokens found")
 	}
+
+	colors.PrintInfo("Sending notification to %d users with valid FCM tokens: %v", len(tokens), validUsers)
 
 	// Send via Ravipangali API
 	response, err := ns.ravipangaliService.SendPushNotification(
@@ -162,13 +181,14 @@ func (ns *NotificationService) SendToMultipleUsers(userIDs []uint, notification 
 
 	colors.PrintSuccess("Multicast notification sent to %d users via Ravipangali: %s - %s",
 		len(tokens), notification.Title, notification.Body)
-	colors.PrintInfo("  Tokens sent: %d", response.TokensSent)
-	colors.PrintInfo("  Tokens delivered: %d", response.TokensDelivered)
-	colors.PrintInfo("  Tokens failed: %d", response.TokensFailed)
+
+	if len(invalidUsers) > 0 {
+		colors.PrintWarning("Users without valid FCM tokens: %v", invalidUsers)
+	}
 
 	return &NotificationServiceResponse{
 		Success: true,
-		Message: fmt.Sprintf("Multicast notification sent successfully to %d users", len(tokens)),
+		Message: "Notification sent successfully",
 	}, nil
 }
 
