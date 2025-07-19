@@ -8,6 +8,7 @@ import (
 	"luna_iot_server/internal/http/controllers"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/internal/protocol"
+	"luna_iot_server/internal/services"
 	"luna_iot_server/pkg/colors"
 	"math"
 	"net"
@@ -32,25 +33,29 @@ type Server struct {
 	deviceConnections map[string]*DeviceConnection
 	connectionMutex   sync.RWMutex
 	timeoutTicker     *time.Ticker
+	// Vehicle notification service
+	vehicleNotificationService *services.VehicleNotificationService
 }
 
 // NewServer creates a new TCP server instance
 func NewServer(port string) *Server {
 	return &Server{
-		port:              port,
-		controlController: controllers.NewControlController(),
-		deviceConnections: make(map[string]*DeviceConnection),
-		timeoutTicker:     time.NewTicker(5 * time.Minute), // Check every 5 minutes
+		port:                       port,
+		controlController:          controllers.NewControlController(),
+		deviceConnections:          make(map[string]*DeviceConnection),
+		timeoutTicker:              time.NewTicker(5 * time.Minute), // Check every 5 minutes
+		vehicleNotificationService: services.NewVehicleNotificationService(),
 	}
 }
 
 // NewServerWithController creates a new TCP server instance with a shared control controller
 func NewServerWithController(port string, sharedController *controllers.ControlController) *Server {
 	return &Server{
-		port:              port,
-		controlController: sharedController,
-		deviceConnections: make(map[string]*DeviceConnection),
-		timeoutTicker:     time.NewTicker(5 * time.Minute), // Check every 5 minutes
+		port:                       port,
+		controlController:          sharedController,
+		deviceConnections:          make(map[string]*DeviceConnection),
+		timeoutTicker:              time.NewTicker(5 * time.Minute), // Check every 5 minutes
+		vehicleNotificationService: services.NewVehicleNotificationService(),
 	}
 }
 
@@ -281,6 +286,15 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 			colors.PrintSuccess("✅ GPS data saved for device %s (Lat=%.12f, Lng=%.12f)",
 				deviceIMEI, lat, lng)
 
+			// Check and send vehicle notifications
+			if s.vehicleNotificationService != nil {
+				go func() {
+					if err := s.vehicleNotificationService.CheckAndSendVehicleNotifications(&gpsData); err != nil {
+						colors.PrintError("Failed to send vehicle notifications: %v", err)
+					}
+				}()
+			}
+
 			// Broadcast the new full GPS data object over WebSocket
 			if http.WSHub != nil {
 				go http.WSHub.BroadcastFullGPSUpdate(&gpsData)
@@ -370,7 +384,7 @@ func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
 	return earthRadius * c
 }
 
-// handleStatusPacket processes device status packets
+// handleStatusPacket processes status information packets
 func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
@@ -409,6 +423,15 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 			colors.PrintError("Error saving status data: %v", err)
 		} else {
 			colors.PrintSuccess("Status data saved for device %s", deviceIMEI)
+
+			// Check and send vehicle notifications for status changes
+			if s.vehicleNotificationService != nil {
+				go func() {
+					if err := s.vehicleNotificationService.CheckAndSendVehicleNotifications(&statusData); err != nil {
+						colors.PrintError("Failed to send vehicle notifications: %v", err)
+					}
+				}()
+			}
 
 			// Broadcast status update as a full GPS update to WebSocket clients
 			if http.WSHub != nil {
