@@ -633,3 +633,133 @@ func (nmc *NotificationManagementController) TestNotificationSystem(c *gin.Conte
 		},
 	})
 }
+
+// DiagnoseFCMTokens checks the status of FCM tokens in the database
+func (nmc *NotificationManagementController) DiagnoseFCMTokens(c *gin.Context) {
+	// Get current user from context
+	userInterface, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"error":   "Unauthorized",
+			"message": "User not authenticated",
+		})
+		return
+	}
+	user := userInterface.(*models.User)
+
+	// Get all users with FCM tokens
+	var users []models.User
+	database := db.GetDB()
+	if err := database.Where("fcm_token IS NOT NULL AND fcm_token != ''").Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to fetch users",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Analyze FCM tokens
+	var validTokens []map[string]interface{}
+	var invalidTokens []map[string]interface{}
+	var shortTokens []map[string]interface{}
+	var emptyTokens []map[string]interface{}
+
+	for _, user := range users {
+		tokenInfo := map[string]interface{}{
+			"user_id":       user.ID,
+			"user_name":     user.Name,
+			"user_phone":    user.Phone,
+			"token_length":  len(user.FCMToken),
+			"token_preview": user.FCMToken[:20] + "...",
+		}
+
+		if user.FCMToken == "" {
+			emptyTokens = append(emptyTokens, tokenInfo)
+		} else if len(user.FCMToken) < 100 {
+			shortTokens = append(shortTokens, tokenInfo)
+		} else {
+			// Check for valid characters
+			valid := true
+			for _, char := range user.FCMToken {
+				if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+					(char >= '0' && char <= '9') || char == ':' || char == '_' || char == '-') {
+					valid = false
+					tokenInfo["invalid_char"] = string(char)
+					break
+				}
+			}
+
+			if valid {
+				validTokens = append(validTokens, tokenInfo)
+			} else {
+				invalidTokens = append(invalidTokens, tokenInfo)
+			}
+		}
+	}
+
+	// Test a valid token if available
+	var testResult map[string]interface{}
+	if len(validTokens) > 0 {
+		// Test the first valid token
+		testUser := users[0]
+		ravipangaliService := services.NewRavipangaliService()
+		response, err := ravipangaliService.SendPushNotification(
+			"FCM Token Diagnostic Test",
+			"This is a diagnostic test to verify FCM token validity",
+			[]string{testUser.FCMToken},
+			"",
+			map[string]interface{}{
+				"diagnostic_test": true,
+				"timestamp":       time.Now().Unix(),
+			},
+			"normal",
+			"notification",
+			"default",
+		)
+
+		if err != nil {
+			testResult = map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			}
+		} else {
+			testResult = map[string]interface{}{
+				"success":          response.Success,
+				"message":          response.Message,
+				"tokens_sent":      response.TokensSent,
+				"tokens_delivered": response.TokensDelivered,
+				"tokens_failed":    response.TokensFailed,
+			}
+		}
+	} else {
+		testResult = map[string]interface{}{
+			"success": false,
+			"error":   "No valid FCM tokens found to test",
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "FCM Token diagnosis completed",
+		"diagnosis": gin.H{
+			"total_users_with_tokens": len(users),
+			"valid_tokens":            len(validTokens),
+			"invalid_tokens":          len(invalidTokens),
+			"short_tokens":            len(shortTokens),
+			"empty_tokens":            len(emptyTokens),
+			"valid_tokens_list":       validTokens,
+			"invalid_tokens_list":     invalidTokens,
+			"short_tokens_list":       shortTokens,
+			"empty_tokens_list":       emptyTokens,
+			"test_result":             testResult,
+		},
+		"recommendations": gin.H{
+			"short_tokens":   "FCM tokens should be at least 100 characters long",
+			"invalid_tokens": "FCM tokens should only contain alphanumeric characters, colons, underscores, and hyphens",
+			"empty_tokens":   "Users need to register FCM tokens through the mobile app",
+			"test_failed":    "If test fails, tokens may be expired or invalid - users should re-register",
+		},
+	})
+}

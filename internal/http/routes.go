@@ -345,6 +345,7 @@ func SetupRoutesWithControlController(router *gin.Engine, sharedControlControlle
 			notificationManagement.POST("/:id/send", notificationManagementController.SendNotification)
 			notificationManagement.POST("/send-device", notificationManagementController.SendNotificationToDevice)
 			notificationManagement.POST("/test-system", notificationManagementController.TestNotificationSystem)
+			notificationManagement.GET("/diagnose-fcm-tokens", notificationManagementController.DiagnoseFCMTokens)
 		}
 
 		// File upload routes (admin only)
