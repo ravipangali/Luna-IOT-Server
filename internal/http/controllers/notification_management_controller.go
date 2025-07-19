@@ -636,7 +636,7 @@ func (nmc *NotificationManagementController) TestNotificationSystem(c *gin.Conte
 
 // DiagnoseFCMTokens checks the status of FCM tokens in the database
 func (nmc *NotificationManagementController) DiagnoseFCMTokens(c *gin.Context) {
-	// Get current user from context
+	// Get current user from context (we don't need the user for this diagnostic)
 	userInterface, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -646,7 +646,7 @@ func (nmc *NotificationManagementController) DiagnoseFCMTokens(c *gin.Context) {
 		})
 		return
 	}
-	user := userInterface.(*models.User)
+	_ = userInterface.(*models.User) // We don't need the user for this diagnostic
 
 	// Get all users with FCM tokens
 	var users []models.User
