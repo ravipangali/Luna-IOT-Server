@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
 	"luna_iot_server/internal/http/controllers"
@@ -27,6 +28,14 @@ func main() {
 	} else {
 		colors.PrintSuccess("Environment configuration loaded from .env file")
 	}
+
+	// Initialize timezone configuration
+	colors.PrintInfo("Initializing timezone configuration...")
+	if err := config.InitializeTimezone(); err != nil {
+		colors.PrintError("Failed to initialize timezone: %v", err)
+		log.Fatalf("Timezone initialization failed: %v", err)
+	}
+	colors.PrintSuccess("Timezone initialized: %s (UTC+%d)", config.GetTimezoneString(), config.GetTimezoneOffset())
 
 	// Initialize database connection
 	colors.PrintInfo("Initializing database connection...")
@@ -61,6 +70,7 @@ func main() {
 	colors.PrintSuccess("Database connection established successfully")
 	colors.PrintControl("Oil & Electricity control system enabled")
 	colors.PrintInfo("Firebase removed - notifications will be simulated")
+	colors.PrintInfo("Server timezone: %s (UTC+%d)", config.GetTimezoneString(), config.GetTimezoneOffset())
 
 	// Create a wait group to manage both servers
 	var wg sync.WaitGroup
@@ -102,55 +112,27 @@ func main() {
 		colors.PrintEndpoint("POST", "/api/v1/my-control/:imei/cut-oil", "Cut oil & electricity")
 		colors.PrintEndpoint("POST", "/api/v1/my-control/:imei/connect-oil", "Connect oil & electricity")
 		colors.PrintEndpoint("POST", "/api/v1/my-control/:imei/get-location", "Request device location")
-		colors.PrintEndpoint("GET", "/api/v1/my-control/active-devices", "Get user's active devices")
-		colors.PrintEndpoint("GET", "/api/v1/my-gps", "Get user's GPS data")
-		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/location", "Get vehicle GPS location")
-		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/status", "Get vehicle GPS status")
-		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/history", "Get vehicle GPS history")
-		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/route", "Get vehicle GPS route")
-		colors.PrintEndpoint("GET", "/api/v1/my-gps/:imei/report", "Get vehicle GPS report")
-
-		colors.PrintSubHeader("Notification API Endpoints")
-		colors.PrintEndpoint("POST", "/api/v1/notifications/fcm-token", "Update FCM token")
-		colors.PrintEndpoint("DELETE", "/api/v1/notifications/fcm-token", "Remove FCM token")
-		colors.PrintEndpoint("POST", "/api/v1/notifications/subscribe/:topic", "Subscribe to topic")
-		colors.PrintEndpoint("DELETE", "/api/v1/notifications/subscribe/:topic", "Unsubscribe from topic")
-		colors.PrintEndpoint("POST", "/api/v1/admin/notifications/send", "Send notification to users (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/admin/notifications/send-to-user/:user_id", "Send notification to specific user (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/admin/notifications/send-to-topic", "Send notification to topic (Admin)")
-
-		colors.PrintSubHeader("Admin API Endpoints")
-		colors.PrintEndpoint("GET", "/api/v1/users", "List all users (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/users", "Create new user (Admin)")
-		colors.PrintEndpoint("GET", "/api/v1/devices", "List all devices (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/devices", "Register new device (Admin)")
-		colors.PrintEndpoint("GET", "/api/v1/vehicles", "List all vehicles (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/vehicles", "Register new vehicle (Admin)")
-		colors.PrintEndpoint("GET", "/api/v1/gps", "Get all GPS tracking data (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/control/cut-oil", "Cut oil & electricity (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/control/connect-oil", "Connect oil & electricity (Admin)")
-		colors.PrintEndpoint("POST", "/api/v1/control/get-location", "Get device location (Admin)")
-		colors.PrintEndpoint("GET", "/api/v1/control/active-devices", "List active devices (Admin)")
-
-		colors.PrintSubHeader("WebSocket Connection")
-		colors.PrintEndpoint("GET", "/ws?token=<auth_token>", "Real-time user-based updates")
 
 		if err := httpServer.Start(); err != nil {
 			errorChan <- fmt.Errorf("HTTP server error: %v", err)
 		}
 	}()
 
-	// Set up graceful shutdown
+	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// Wait for either an error or shutdown signal
+	// Wait for either server error or interrupt signal
 	select {
 	case err := <-errorChan:
-		colors.PrintError("Server startup failed: %v", err)
-		return
+		colors.PrintError("Server error: %v", err)
+		log.Fatalf("Server error: %v", err)
 	case <-quit:
 		colors.PrintShutdown()
-		return
+		colors.PrintInfo("Shutting down Luna IoT Server...")
 	}
+
+	// Wait for both servers to finish
+	wg.Wait()
+	colors.PrintSuccess("Luna IoT Server shutdown complete")
 }

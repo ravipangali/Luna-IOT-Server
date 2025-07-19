@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/models"
 	"luna_iot_server/pkg/colors"
@@ -132,17 +133,20 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 func (vns *VehicleNotificationService) sendIgnitionNotification(data *VehicleNotificationData, notificationType NotificationType) error {
 	var title, body string
 
+	// Use timezone-aware time formatting
+	currentTime := config.GetCurrentTime()
+
 	switch notificationType {
 	case NotificationTypeIgnitionOn:
 		title = fmt.Sprintf("%s: Ignition On", data.RegNo)
 		body = fmt.Sprintf("Your vehicle is turned ON\nDate: %s\nTime: %s",
-			data.Timestamp.Format("2006-01-02"),
-			data.Timestamp.Format("03:04 PM"))
+			currentTime.Format("2006-01-02"),
+			currentTime.Format("03:04 PM"))
 	case NotificationTypeIgnitionOff:
 		title = fmt.Sprintf("%s: Ignition Off", data.RegNo)
 		body = fmt.Sprintf("Your vehicle is turned OFF\nDate: %s\nTime: %s",
-			data.Timestamp.Format("2006-01-02"),
-			data.Timestamp.Format("03:04 PM"))
+			currentTime.Format("2006-01-02"),
+			currentTime.Format("03:04 PM"))
 	default:
 		return fmt.Errorf("unknown ignition notification type: %s", notificationType)
 	}
@@ -154,19 +158,22 @@ func (vns *VehicleNotificationService) sendIgnitionNotification(data *VehicleNot
 func (vns *VehicleNotificationService) sendSpeedNotification(data *VehicleNotificationData, notificationType NotificationType, currentSpeed int, threshold int) error {
 	var title, body string
 
+	// Use timezone-aware time formatting
+	currentTime := config.GetCurrentTime()
+
 	switch notificationType {
 	case NotificationTypeOverspeed:
 		title = fmt.Sprintf("%s: Vehicle is Overspeed", data.RegNo)
 		body = fmt.Sprintf("Your vehicle is overspeeding (Speed: %d km/h)\nDate: %s\nTime: %s",
 			currentSpeed,
-			data.Timestamp.Format("2006-01-02"),
-			data.Timestamp.Format("03:04 PM"))
+			currentTime.Format("2006-01-02"),
+			currentTime.Format("03:04 PM"))
 	case NotificationTypeRunning:
 		title = fmt.Sprintf("%s: Vehicle is Running", data.RegNo)
 		body = fmt.Sprintf("Your vehicle is moving (Speed: %d km/h)\nDate: %s\nTime: %s",
 			currentSpeed,
-			data.Timestamp.Format("2006-01-02"),
-			data.Timestamp.Format("03:04 PM"))
+			currentTime.Format("2006-01-02"),
+			currentTime.Format("03:04 PM"))
 	default:
 		return fmt.Errorf("unknown speed notification type: %s", notificationType)
 	}
@@ -202,7 +209,7 @@ func (vns *VehicleNotificationService) sendNotificationToVehicleUsers(imei, titl
 	var fcmTokens []string
 	for _, uv := range userVehicles {
 		// Check if access has expired
-		if uv.ExpiresAt != nil && time.Now().After(*uv.ExpiresAt) {
+		if uv.ExpiresAt != nil && config.GetCurrentTime().After(*uv.ExpiresAt) {
 			colors.PrintWarning("⏰ User %d access expired for vehicle %s", uv.UserID, imei)
 			continue
 		}
@@ -231,7 +238,7 @@ func (vns *VehicleNotificationService) sendNotificationToVehicleUsers(imei, titl
 		map[string]interface{}{
 			"vehicle_imei":      imei,
 			"notification_type": notificationType,
-			"timestamp":         time.Now().Unix(),
+			"timestamp":         config.GetCurrentTime().Unix(),
 		},
 		"high", // High priority for vehicle notifications
 		notificationType,

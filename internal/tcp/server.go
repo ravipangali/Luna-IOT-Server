@@ -3,6 +3,7 @@ package tcp
 import (
 	"encoding/json"
 	"fmt"
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
 	"luna_iot_server/internal/http/controllers"
@@ -98,27 +99,18 @@ func (s *Server) isDeviceRegistered(imei string) bool {
 
 // handleConnection handles incoming IoT device connections
 func (s *Server) handleConnection(conn net.Conn) {
-	// Track device IMEI for this connection
-	var deviceIMEI string
+	defer conn.Close()
 
-	defer func() {
-		conn.Close()
-		// Unregister connection when it closes
-		if deviceIMEI != "" {
-			s.controlController.UnregisterConnection(deviceIMEI)
-			s.removeDeviceConnection(deviceIMEI)
+	colors.PrintConnection("📱", "New IoT Device connected: %s", conn.RemoteAddr())
 
-			// ENHANCED FIX: When device disconnects, don't send device status - let the monitoring system handle it
-			// The checkDevicesForInactiveStatus will properly broadcast status based on GPS data age
-			colors.PrintInfo("📱 Device %s disconnected, monitoring system will handle status updates based on GPS data", deviceIMEI)
-		}
-	}()
-
-	colors.PrintConnection("📱", "IoT Device connected from %s", conn.RemoteAddr())
-
-	// Create a new GT06 decoder instance for this connection
+	// Create GT06 decoder for this connection
 	decoder := protocol.NewGT06Decoder()
+	deviceIMEI := ""
 
+	// Set connection timeout
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
+	// Buffer for reading data
 	buffer := make([]byte, 1024)
 
 	for {
@@ -189,52 +181,28 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-// handleLoginPacket processes device login packets
+// handleLoginPacket processes login packets and returns the device IMEI
 func (s *Server) handleLoginPacket(packet *protocol.DecodedPacket, conn net.Conn) string {
-	// Add safety checks
-	if packet == nil {
-		colors.PrintError("Received nil packet in handleLoginPacket")
-		return ""
+	deviceIMEI := packet.TerminalID
+	colors.PrintConnection("🔐", "Device login: %s from %s", deviceIMEI, conn.RemoteAddr())
+
+	// Register connection with control controller
+	s.controlController.RegisterConnection(deviceIMEI, conn)
+
+	// Update device activity
+	s.updateDeviceActivity(deviceIMEI, conn)
+
+	// Check if device is registered in database
+	if s.isDeviceRegistered(deviceIMEI) {
+		colors.PrintSuccess("✅ Device %s is registered in database", deviceIMEI)
+	} else {
+		colors.PrintWarning("⚠️ Device %s is not registered in database", deviceIMEI)
 	}
 
-	if packet.TerminalID == "" {
-		colors.PrintWarning("Login packet with empty TerminalID from %s", conn.RemoteAddr())
-		return ""
-	}
-
-	if len(packet.TerminalID) < 16 {
-		colors.PrintWarning("Login packet with invalid TerminalID length (%d) from %s", len(packet.TerminalID), conn.RemoteAddr())
-		return ""
-	}
-
-	potentialIMEI := packet.TerminalID[:16]
-
-	// Validate device registration
-	if !s.isDeviceRegistered(potentialIMEI) {
-		colors.PrintError("Unauthorized device: %s", potentialIMEI)
-		conn.Close()
-		return ""
-	}
-
-	colors.PrintSuccess("Authorized device login: %s", potentialIMEI)
-	s.controlController.RegisterConnection(potentialIMEI, conn)
-
-	// Get vehicle info for WebSocket broadcast
-	var vehicle models.Vehicle
-	vehicleReg := ""
-	if err := db.GetDB().Where("imei = ?", potentialIMEI).First(&vehicle).Error; err == nil {
-		vehicleReg = vehicle.RegNo
-	}
-
-	// Broadcast device connection to WebSocket clients
-	if http.WSHub != nil {
-		http.WSHub.BroadcastDeviceStatus(potentialIMEI, "connected", vehicleReg)
-	}
-
-	return potentialIMEI
+	return deviceIMEI
 }
 
-// handleGPSPacket processes GPS data packets with advanced filtering
+// handleGPSPacket processes GPS packets
 func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
@@ -309,71 +277,49 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 
 // shouldAcceptGPSBasedOnIgnition checks if GPS should be accepted based on ignition status
 func (s *Server) shouldAcceptGPSBasedOnIgnition(imei string, packet *protocol.DecodedPacket) bool {
-	// First check current packet ignition
-	currentIgnition := packet.Ignition
-
-	// If current packet has ignition data
-	if currentIgnition != "" {
-		if currentIgnition == "ON" {
-			colors.PrintData("🔑", "Ignition ON in current packet - accepting GPS")
-			return true
-		} else {
-			colors.PrintWarning("🔑 Ignition OFF in current packet - rejecting GPS")
-			return false
-		}
-	}
-
-	// If no ignition in current packet, check database for last known ignition status
-	var lastStatus models.GPSData
-	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != ''", imei).
-		Order("timestamp DESC").
-		First(&lastStatus).Error
-
-	if err != nil {
-		colors.PrintWarning("🔑 No ignition history found for device %s - rejecting GPS", imei)
+	// If ignition is explicitly OFF, reject GPS data
+	if packet.Ignition == "OFF" {
+		colors.PrintWarning("🚫 GPS rejected for %s: Ignition is OFF", imei)
 		return false
 	}
 
-	if lastStatus.Ignition == "ON" {
-		colors.PrintData("🔑", "Last known ignition status: ON - accepting GPS")
+	// If ignition is ON or empty, accept GPS data
+	if packet.Ignition == "ON" || packet.Ignition == "" {
 		return true
-	} else {
-		colors.PrintWarning("🔑 Last known ignition status: %s - rejecting GPS", lastStatus.Ignition)
-		return false
 	}
+
+	// For any other ignition status, accept GPS data
+	return true
 }
 
-// isDuplicateCoordinates checks if the coordinates are the same as the last saved ones
+// isDuplicateCoordinates checks if the coordinates are duplicate (within 10 meters)
 func (s *Server) isDuplicateCoordinates(imei string, lat, lng float64) bool {
-	var lastGPS models.GPSData
-	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL", imei).
-		Order("timestamp DESC").
-		First(&lastGPS).Error
+	// Get the latest GPS data for this device
+	var latestGPS models.GPSData
+	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
+		imei).Order("timestamp DESC").First(&latestGPS).Error
 
 	if err != nil {
 		// No previous GPS data, not a duplicate
 		return false
 	}
 
-	// Check if coordinates are exactly the same (with precision tolerance)
-	const tolerance = 0.000001 // ~1 meter precision
-	latDiff := math.Abs(*lastGPS.Latitude - lat)
-	lngDiff := math.Abs(*lastGPS.Longitude - lng)
+	// Calculate distance between current and latest coordinates
+	distance := s.calculateDistance(lat, lng, *latestGPS.Latitude, *latestGPS.Longitude)
 
-	isDuplicate := latDiff < tolerance && lngDiff < tolerance
-	if isDuplicate {
-		colors.PrintWarning("📍 Duplicate coordinates detected: Last(%.12f,%.12f) Current(%.12f,%.12f)",
-			*lastGPS.Latitude, *lastGPS.Longitude, lat, lng)
+	// If distance is less than 10 meters, consider it duplicate
+	if distance < 0.01 { // 10 meters = 0.01 km
+		return true
 	}
 
-	return isDuplicate
+	return false
 }
 
-// calculateDistance calculates the distance between two GPS points in meters
+// calculateDistance calculates the distance between two coordinates using Haversine formula
 func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
-	const earthRadius = 6371000 // Earth radius in meters
+	const R = 6371 // Earth's radius in kilometers
 
-	// Convert degrees to radians
+	// Convert to radians
 	lat1Rad := lat1 * math.Pi / 180
 	lat2Rad := lat2 * math.Pi / 180
 	deltaLat := (lat2 - lat1) * math.Pi / 180
@@ -385,10 +331,10 @@ func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
 			math.Sin(deltaLng/2)*math.Sin(deltaLng/2)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
-	return earthRadius * c
+	return R * c
 }
 
-// handleStatusPacket processes status information packets
+// handleStatusPacket processes status packets
 func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Conn, deviceIMEI string) {
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
@@ -439,11 +385,11 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 		if err := db.GetDB().Create(&statusData).Error; err != nil {
 			colors.PrintError("Error saving status data: %v", err)
 		} else {
-			colors.PrintSuccess("Status data saved for device %s", deviceIMEI)
+			colors.PrintSuccess("✅ Status data saved for device %s", deviceIMEI)
 
-			// STEP 3: Broadcast status update as a full GPS update to WebSocket clients
+			// Broadcast status update to WebSocket clients
 			if http.WSHub != nil {
-				go http.WSHub.BroadcastFullGPSUpdate(&statusData)
+				go http.WSHub.BroadcastStatusUpdate(&statusData, "", "")
 			}
 		}
 	}
@@ -451,22 +397,17 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 
 // handleAlarmPacket processes alarm packets
 func (s *Server) handleAlarmPacket(packet *protocol.DecodedPacket, conn net.Conn) {
-	colors.PrintWarning("Alarm from %s: Type=%+v", conn.RemoteAddr(), packet.AlarmType)
+	colors.PrintWarning("🚨 Alarm data received from %s: %+v", conn.RemoteAddr(), packet)
 }
 
-// sendResponse sends response back to device
+// sendResponse sends a response to the device
 func (s *Server) sendResponse(packet *protocol.DecodedPacket, conn net.Conn, decoder *protocol.GT06Decoder) {
 	response := decoder.GenerateResponse(uint16(packet.SerialNumber), packet.Protocol)
-
-	_, err := conn.Write(response)
-	if err != nil {
-		colors.PrintError("Error sending response to %s: %v", conn.RemoteAddr(), err)
-	} else {
-		colors.PrintData("📤", "Sent response to %s: %X", conn.RemoteAddr(), response)
-	}
+	conn.Write(response)
+	colors.PrintData("📤", "Response sent to device: %X", response)
 }
 
-// buildGPSData creates a GPSData model from decoded packet
+// buildGPSData creates a GPSData model from a decoded packet
 func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
 	gpsData := models.GPSData{
 		IMEI:         deviceIMEI,
@@ -537,32 +478,32 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 // buildStatusData creates a GPSData model for status information
 func (s *Server) buildStatusData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
 	statusData := models.GPSData{
-		IMEI:           deviceIMEI,
-		Timestamp:      packet.Timestamp,
-		ProtocolName:   packet.ProtocolName,
-		RawPacket:      packet.Raw,
-		Ignition:       packet.Ignition,
-		Charger:        packet.Charger,
-		GPSTracking:    packet.GPSTracking,
-		OilElectricity: packet.OilElectricity,
-		DeviceStatus:   packet.DeviceStatus,
+		IMEI:         deviceIMEI,
+		Timestamp:    packet.Timestamp,
+		ProtocolName: packet.ProtocolName,
+		RawPacket:    packet.Raw,
 	}
 
-	// Voltage information
+	// Device status
+	statusData.Ignition = packet.Ignition
+	statusData.Charger = packet.Charger
+	statusData.GPSTracking = packet.GPSTracking
+	statusData.OilElectricity = packet.OilElectricity
+	statusData.DeviceStatus = packet.DeviceStatus
+
+	// Signal & Power
 	if packet.Voltage != nil {
 		voltageLevel := int(packet.Voltage.Level)
 		statusData.VoltageLevel = &voltageLevel
 		statusData.VoltageStatus = packet.Voltage.Status
 	}
-
-	// GSM information
 	if packet.GSMSignal != nil {
 		gsmSignal := int(packet.GSMSignal.Level)
 		statusData.GSMSignal = &gsmSignal
 		statusData.GSMStatus = packet.GSMSignal.Status
 	}
 
-	// Alarm information
+	// Alarm data
 	if packet.Alarm != nil {
 		statusData.AlarmActive = packet.Alarm.Active
 		statusData.AlarmType = packet.Alarm.Type
@@ -572,88 +513,41 @@ func (s *Server) buildStatusData(packet *protocol.DecodedPacket, deviceIMEI stri
 	return statusData
 }
 
-// isDuplicateStatusData checks if the status data is identical to the last saved status
+// isDuplicateStatusData checks if status data is duplicate (within 1 minute)
 func (s *Server) isDuplicateStatusData(imei string, packet *protocol.DecodedPacket) bool {
-	var lastStatus models.GPSData
-	err := db.GetDB().Where("imei = ? AND protocol_name = ?", imei, packet.ProtocolName).
-		Order("timestamp DESC").
-		First(&lastStatus).Error
+	// Get the latest status data for this device
+	var latestStatus models.GPSData
+	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != ''",
+		imei).Order("timestamp DESC").First(&latestStatus).Error
 
 	if err != nil {
 		// No previous status data, not a duplicate
 		return false
 	}
 
-	// Check if ALL status fields are identical
-	isDuplicate := lastStatus.Ignition == packet.Ignition &&
-		lastStatus.Charger == packet.Charger &&
-		lastStatus.GPSTracking == packet.GPSTracking &&
-		lastStatus.OilElectricity == packet.OilElectricity &&
-		lastStatus.DeviceStatus == packet.DeviceStatus &&
-		lastStatus.VoltageStatus == packet.Voltage.Status &&
-		lastStatus.GSMStatus == packet.GSMSignal.Status &&
-		lastStatus.ProtocolName == packet.ProtocolName
-
-	// Check voltage level if both exist
-	if packet.Voltage != nil && lastStatus.VoltageLevel != nil {
-		isDuplicate = isDuplicate && *lastStatus.VoltageLevel == int(packet.Voltage.Level)
-	} else if packet.Voltage != nil || lastStatus.VoltageLevel != nil {
-		// One has voltage data, the other doesn't - not duplicate
-		isDuplicate = false
+	// Check if the latest status data is within 1 minute
+	timeDiff := packet.Timestamp.Sub(latestStatus.Timestamp)
+	if timeDiff < time.Minute {
+		// Check if ignition status is the same
+		if latestStatus.Ignition == packet.Ignition {
+			colors.PrintWarning("🚫 Status data rejected: Duplicate status within 1 minute")
+			return true
+		}
 	}
 
-	// Check GSM signal level if both exist
-	if packet.GSMSignal != nil && lastStatus.GSMSignal != nil {
-		isDuplicate = isDuplicate && *lastStatus.GSMSignal == int(packet.GSMSignal.Level)
-	} else if packet.GSMSignal != nil || lastStatus.GSMSignal != nil {
-		// One has GSM data, the other doesn't - not duplicate
-		isDuplicate = false
-	}
-
-	if isDuplicate {
-		colors.PrintWarning("📊 Duplicate status data detected for device %s - ignoring", imei)
-	}
-
-	return isDuplicate
+	return false
 }
 
-// monitorDeviceTimeouts checks for devices that haven't sent data in over an hour
+// monitorDeviceTimeouts monitors device connections for timeouts
 func (s *Server) monitorDeviceTimeouts() {
+	colors.PrintInfo("⏰ Starting device timeout monitor...")
+
 	for range s.timeoutTicker.C {
-		s.connectionMutex.Lock()
-		now := time.Now()
-
-		// Check connected devices for timeout
-		for imei, deviceConn := range s.deviceConnections {
-			// Check if device hasn't sent data for more than 1 hour
-			if now.Sub(deviceConn.LastActivity) > time.Hour && deviceConn.IsActive {
-				colors.PrintWarning("📱 Device %s connection timed out (no data for %v)",
-					imei, now.Sub(deviceConn.LastActivity))
-
-				// Mark as inactive
-				deviceConn.IsActive = false
-
-				// Close connection
-				if deviceConn.Conn != nil {
-					deviceConn.Conn.Close()
-				}
-
-				// Unregister from control controller
-				s.controlController.UnregisterConnection(imei)
-
-				// ENHANCED FIX: Don't broadcast status on timeout - let the monitoring system handle it
-				// The checkDevicesForInactiveStatus will properly determine status based on GPS data age
-				colors.PrintInfo("📱 Device %s connection timed out, monitoring system will determine proper status", imei)
-			}
-		}
-		s.connectionMutex.Unlock()
-
-		// Check all devices in database for inactive status based on GPS data
 		s.checkDevicesForInactiveStatus()
 	}
 }
 
-// checkDevicesForInactiveStatus checks all devices and marks them stopped/inactive based on data age
+// checkDevicesForInactiveStatus checks all devices for inactive status
 func (s *Server) checkDevicesForInactiveStatus() {
 	var devices []models.Device
 	if err := db.GetDB().Find(&devices).Error; err != nil {
@@ -661,7 +555,7 @@ func (s *Server) checkDevicesForInactiveStatus() {
 		return
 	}
 
-	now := time.Now()
+	now := config.GetCurrentTime()
 	oneHourAgo := now.Add(-time.Hour)
 
 	for _, device := range devices {
@@ -723,36 +617,22 @@ func (s *Server) broadcastInactiveStatus(imei string) {
 	}
 }
 
-// broadcastNoDataStatus broadcasts no-data status for a device (literally no GPS data in database)
+// broadcastNoDataStatus broadcasts no-data status for a device (never sent GPS data)
 func (s *Server) broadcastNoDataStatus(imei string) {
 	// Get vehicle info for WebSocket broadcast
 	var vehicle models.Vehicle
 	vehicleReg := ""
-	vehicleName := ""
 	if err := db.GetDB().Where("imei = ?", imei).First(&vehicle).Error; err == nil {
 		vehicleReg = vehicle.RegNo
-		vehicleName = vehicle.Name
 	}
 
-	// Create a GPS update with no-data status
+	// Broadcast device as no-data
 	if http.WSHub != nil {
-		// Use BroadcastGPSUpdate to send no-data status properly
-		gpsData := &models.GPSData{
-			IMEI:      imei,
-			Timestamp: time.Now(),
-			// No coordinates - will show as no-data
-			Latitude:     nil,
-			Longitude:    nil,
-			Speed:        nil,
-			Course:       nil,
-			Ignition:     "OFF",
-			ProtocolName: "NO_DATA",
-		}
-		http.WSHub.BroadcastGPSUpdate(gpsData, vehicleName, vehicleReg)
+		http.WSHub.BroadcastDeviceStatus(imei, "no-data", vehicleReg)
 	}
 }
 
-// broadcastInactiveStatusWithGPS broadcasts inactive status but with GPS data for positioning
+// broadcastInactiveStatusWithGPS broadcasts inactive status with GPS data
 func (s *Server) broadcastInactiveStatusWithGPS(imei string, gpsData *models.GPSData) {
 	// Get vehicle info for WebSocket broadcast
 	var vehicle models.Vehicle
@@ -763,13 +643,13 @@ func (s *Server) broadcastInactiveStatusWithGPS(imei string, gpsData *models.GPS
 		vehicleName = vehicle.Name
 	}
 
-	// Broadcast GPS data - the frontend will calculate status as "inactive" due to old timestamp
+	// Broadcast inactive status with GPS data
 	if http.WSHub != nil {
-		http.WSHub.BroadcastGPSUpdate(gpsData, vehicleName, vehicleReg)
+		http.WSHub.BroadcastStatusUpdate(gpsData, vehicleName, vehicleReg)
 	}
 }
 
-// broadcastVehicleStatusFromGPS broadcasts current vehicle status based on GPS data
+// broadcastVehicleStatusFromGPS broadcasts vehicle status based on GPS data
 func (s *Server) broadcastVehicleStatusFromGPS(imei string, gpsData *models.GPSData) {
 	// Get vehicle info for WebSocket broadcast
 	var vehicle models.Vehicle
@@ -780,9 +660,9 @@ func (s *Server) broadcastVehicleStatusFromGPS(imei string, gpsData *models.GPSD
 		vehicleName = vehicle.Name
 	}
 
-	// Broadcast GPS data - frontend will calculate appropriate status (running/idle/stopped)
+	// Broadcast vehicle status based on GPS data
 	if http.WSHub != nil {
-		http.WSHub.BroadcastGPSUpdate(gpsData, vehicleName, vehicleReg)
+		http.WSHub.BroadcastStatusUpdate(gpsData, vehicleName, vehicleReg)
 	}
 }
 
@@ -792,12 +672,12 @@ func (s *Server) updateDeviceActivity(imei string, conn net.Conn) {
 	defer s.connectionMutex.Unlock()
 
 	if deviceConn, exists := s.deviceConnections[imei]; exists {
-		deviceConn.LastActivity = time.Now()
+		deviceConn.LastActivity = config.GetCurrentTime()
 		deviceConn.IsActive = true
 	} else {
 		s.deviceConnections[imei] = &DeviceConnection{
 			Conn:         conn,
-			LastActivity: time.Now(),
+			LastActivity: config.GetCurrentTime(),
 			IMEI:         imei,
 			IsActive:     true,
 		}
@@ -808,5 +688,9 @@ func (s *Server) updateDeviceActivity(imei string, conn net.Conn) {
 func (s *Server) removeDeviceConnection(imei string) {
 	s.connectionMutex.Lock()
 	defer s.connectionMutex.Unlock()
-	delete(s.deviceConnections, imei)
+
+	if deviceConn, exists := s.deviceConnections[imei]; exists {
+		deviceConn.IsActive = false
+		colors.PrintConnection("📱", "Device %s marked as inactive", imei)
+	}
 }

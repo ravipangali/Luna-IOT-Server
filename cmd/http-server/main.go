@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
 	"luna_iot_server/internal/http"
 	"luna_iot_server/pkg/colors"
@@ -15,6 +16,14 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		colors.PrintWarning("No .env file found, using system environment variables")
 	}
+
+	// Initialize timezone configuration
+	colors.PrintInfo("Initializing timezone configuration...")
+	if err := config.InitializeTimezone(); err != nil {
+		colors.PrintError("Failed to initialize timezone: %v", err)
+		log.Fatalf("Timezone initialization failed: %v", err)
+	}
+	colors.PrintSuccess("Timezone initialized: %s (UTC+%d)", config.GetTimezoneString(), config.GetTimezoneOffset())
 
 	// Initialize database connection
 	if err := db.Initialize(); err != nil {
@@ -41,6 +50,7 @@ func main() {
 	colors.PrintEndpoint("POST", "/api/v1/devices", "Register new device")
 	colors.PrintEndpoint("GET", "/api/v1/vehicles", "List all vehicles")
 	colors.PrintEndpoint("POST", "/api/v1/vehicles", "Register new vehicle")
+	colors.PrintInfo("Server timezone: %s (UTC+%d)", config.GetTimezoneString(), config.GetTimezoneOffset())
 
 	if err := server.Start(); err != nil {
 		colors.PrintError("Failed to start HTTP server: %v", err)
