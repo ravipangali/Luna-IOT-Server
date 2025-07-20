@@ -262,10 +262,15 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 		return
 	}
 
-	// Check if GPS is positioned
+	// Check if GPS is positioned - LESS STRICT: Accept if satellites >= 3 even if not positioned
 	if s.enableGPSValidation && packet.GPSPositioned != nil && !*packet.GPSPositioned {
-		colors.PrintWarning("📍 GPS not positioned properly")
-		return
+		// Only reject if we also have poor satellite signal
+		if packet.Satellites == nil || *packet.Satellites < 3 {
+			colors.PrintWarning("📍 GPS not positioned properly and poor satellite signal")
+			return
+		}
+		// If we have good satellite signal (>=3), accept the GPS data even if not positioned
+		colors.PrintWarning("⚠️ GPS not positioned but good satellite signal (%d satellites) - accepting", *packet.Satellites)
 	}
 
 	colors.PrintData("🌍", "Processing GPS: Lat=%.12f, Lng=%.12f, Speed=%v km/h, Ignition=%s, Satellites=%v",

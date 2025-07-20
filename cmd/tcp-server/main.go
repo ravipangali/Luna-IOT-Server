@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"luna_iot_server/config"
 	"luna_iot_server/internal/db"
@@ -16,6 +17,11 @@ import (
 var controlController *controllers.ControlController
 
 func main() {
+	// Parse command line flags
+	disableGPSValidation := flag.Bool("disable-gps-validation", false, "Disable GPS validation for testing")
+	disableGPSSmoothing := flag.Bool("disable-gps-smoothing", false, "Disable GPS smoothing for testing")
+	flag.Parse()
+
 	// Load environment variables from .env file
 	if err := godotenv.Load(); err != nil {
 		colors.PrintWarning("No .env file found, using system environment variables")
@@ -52,8 +58,25 @@ func main() {
 	colors.PrintControl("Oil/Electricity control system enabled - Ready for commands")
 	colors.PrintInfo("Server timezone: %s (UTC+%d)", config.GetTimezoneString(), config.GetTimezoneOffset())
 
+	// Show GPS processing configuration
+	if *disableGPSValidation {
+		colors.PrintWarning("📍 GPS Validation: DISABLED (testing mode)")
+	} else {
+		colors.PrintInfo("📍 GPS Validation: Enabled")
+	}
+
+	if *disableGPSSmoothing {
+		colors.PrintWarning("📍 GPS Smoothing: DISABLED (testing mode)")
+	} else {
+		colors.PrintInfo("📍 GPS Smoothing: Enabled")
+	}
+
 	// Create and start the enhanced TCP server
 	tcpServer := tcp.NewServerWithController(port, controlController)
+
+	// Configure GPS processing based on flags
+	tcpServer.ConfigureGPSProcessing(!*disableGPSValidation, !*disableGPSSmoothing)
+
 	if err := tcpServer.Start(); err != nil {
 		colors.PrintError("Failed to start TCP server: %v", err)
 		log.Fatalf("Failed to start TCP server: %v", err)
