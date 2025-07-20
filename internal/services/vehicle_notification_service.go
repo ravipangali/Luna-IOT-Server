@@ -12,12 +12,23 @@ import (
 // VehicleNotificationService handles vehicle-specific notifications
 type VehicleNotificationService struct {
 	ravipangaliService *RavipangaliService
+	// Track vehicle states to prevent duplicate notifications
+	vehicleStates map[string]*VehicleState
+}
+
+// VehicleState tracks the current state of a vehicle
+type VehicleState struct {
+	IsMoving       bool
+	IsOverspeeding bool
+	LastSpeed      int
+	LastUpdate     time.Time
 }
 
 // NewVehicleNotificationService creates a new vehicle notification service
 func NewVehicleNotificationService() *VehicleNotificationService {
 	return &VehicleNotificationService{
 		ravipangaliService: NewRavipangaliService(),
+		vehicleStates:      make(map[string]*VehicleState),
 	}
 }
 
@@ -54,11 +65,18 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 
 	colors.PrintInfo("🚗 Vehicle found: %s (%s)", vehicle.Name, vehicle.RegNo)
 
-	// Get the PREVIOUS valid GPS data from database for comparison (exclude current data being processed)
-	var lastGPSData models.GPSData
-	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != '' AND id != ?", gpsData.IMEI, gpsData.ID).
-		Order("timestamp DESC").
-		First(&lastGPSData).Error
+	// Get or create vehicle state tracker
+	vehicleState, exists := vns.vehicleStates[gpsData.IMEI]
+	if !exists {
+		vehicleState = &VehicleState{
+			IsMoving:       false,
+			IsOverspeeding: false,
+			LastSpeed:      0,
+			LastUpdate:     config.GetCurrentTime(),
+		}
+		vns.vehicleStates[gpsData.IMEI] = vehicleState
+		colors.PrintInfo("🆕 Created new state tracker for vehicle %s", gpsData.IMEI)
+	}
 
 	// Prepare notification data
 	notificationData := &VehicleNotificationData{
@@ -73,6 +91,12 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 	// Check ignition status changes
 	if gpsData.Ignition != "" {
 		colors.PrintInfo("🔑 Current ignition status: %s", gpsData.Ignition)
+
+		// Get the PREVIOUS valid GPS data from database for ignition comparison
+		var lastGPSData models.GPSData
+		err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != '' AND id != ?", gpsData.IMEI, gpsData.ID).
+			Order("timestamp DESC").
+			First(&lastGPSData).Error
 
 		if err != nil {
 			// No previous data, this is the first ignition status
@@ -101,36 +125,52 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 	if gpsData.Speed != nil {
 		currentSpeed := *gpsData.Speed
 		colors.PrintInfo("🏃 Current speed: %d km/h, Overspeed limit: %d km/h", currentSpeed, vehicle.Overspeed)
+		colors.PrintInfo("📊 Vehicle state - Moving: %v, Overspeeding: %v, Last Speed: %d",
+			vehicleState.IsMoving, vehicleState.IsOverspeeding, vehicleState.LastSpeed)
 
-		// Check for overspeed
-		if currentSpeed > vehicle.Overspeed {
-			// Check if last speed was also overspeed
-			if err != nil || (lastGPSData.Speed == nil || *lastGPSData.Speed <= vehicle.Overspeed) {
-				colors.PrintWarning("🚨 Overspeed detected! Speed: %d km/h, Limit: %d km/h", currentSpeed, vehicle.Overspeed)
-				return vns.sendSpeedNotification(notificationData, NotificationTypeOverspeed, currentSpeed, vehicle.Overspeed)
-			} else {
-				colors.PrintInfo("⏭️ Already overspeeding - skipping notification")
-			}
+		// Check for overspeed state change
+		isCurrentlyOverspeeding := currentSpeed > vehicle.Overspeed
+		if isCurrentlyOverspeeding && !vehicleState.IsOverspeeding {
+			// Transition from normal speed to overspeed
+			colors.PrintWarning("🚨 Overspeed detected! Speed: %d km/h, Limit: %d km/h", currentSpeed, vehicle.Overspeed)
+			vehicleState.IsOverspeeding = true
+			vehicleState.LastSpeed = currentSpeed
+			vehicleState.LastUpdate = config.GetCurrentTime()
+			return vns.sendSpeedNotification(notificationData, NotificationTypeOverspeed, currentSpeed, vehicle.Overspeed)
+		} else if !isCurrentlyOverspeeding && vehicleState.IsOverspeeding {
+			// Transition from overspeed to normal speed
+			colors.PrintInfo("✅ Vehicle returned to normal speed: %d km/h", currentSpeed)
+			vehicleState.IsOverspeeding = false
+			vehicleState.LastSpeed = currentSpeed
+			vehicleState.LastUpdate = config.GetCurrentTime()
+		} else if isCurrentlyOverspeeding {
+			colors.PrintInfo("⏭️ Already overspeeding - skipping notification")
 		}
 
-		// Check for running (speed > 5)
-		if currentSpeed > 5 {
-			// Get previous speed for comparison
-			var previousSpeed *int
-			if err == nil && lastGPSData.Speed != nil {
-				previousSpeed = lastGPSData.Speed
-				colors.PrintInfo("📊 Previous speed: %d km/h", *previousSpeed)
-			} else {
-				colors.PrintInfo("📝 No previous speed data found")
-			}
-
-			// Check if this is a transition from stopped (≤5) to moving (>5)
-			if err != nil || (previousSpeed == nil || *previousSpeed <= 5) {
-				colors.PrintInfo("🏃 Vehicle started moving! Speed: %d km/h (previous: %v)", currentSpeed, previousSpeed)
-				return vns.sendSpeedNotification(notificationData, NotificationTypeRunning, currentSpeed, 5)
-			} else {
-				colors.PrintInfo("⏭️ Vehicle already moving (previous speed: %d km/h) - skipping notification", *previousSpeed)
-			}
+		// Check for moving state change
+		isCurrentlyMoving := currentSpeed > 5
+		if isCurrentlyMoving && !vehicleState.IsMoving {
+			// Transition from stopped to moving
+			colors.PrintInfo("🏃 Vehicle started moving! Speed: %d km/h (previous: %d)", currentSpeed, vehicleState.LastSpeed)
+			vehicleState.IsMoving = true
+			vehicleState.LastSpeed = currentSpeed
+			vehicleState.LastUpdate = config.GetCurrentTime()
+			return vns.sendSpeedNotification(notificationData, NotificationTypeRunning, currentSpeed, 5)
+		} else if !isCurrentlyMoving && vehicleState.IsMoving {
+			// Transition from moving to stopped
+			colors.PrintInfo("🛑 Vehicle stopped moving. Speed: %d km/h", currentSpeed)
+			vehicleState.IsMoving = false
+			vehicleState.LastSpeed = currentSpeed
+			vehicleState.LastUpdate = config.GetCurrentTime()
+		} else if isCurrentlyMoving {
+			colors.PrintInfo("⏭️ Vehicle already moving (speed: %d km/h) - skipping notification", currentSpeed)
+			// Update last speed even if already moving
+			vehicleState.LastSpeed = currentSpeed
+			vehicleState.LastUpdate = config.GetCurrentTime()
+		} else {
+			// Vehicle is stopped
+			vehicleState.LastSpeed = currentSpeed
+			vehicleState.LastUpdate = config.GetCurrentTime()
 		}
 	}
 
@@ -268,4 +308,42 @@ func (vns *VehicleNotificationService) sendNotificationToVehicleUsers(imei, titl
 	}
 
 	return nil
+}
+
+// CleanupOldVehicleStates removes vehicle states that haven't been updated for more than 24 hours
+func (vns *VehicleNotificationService) CleanupOldVehicleStates() {
+	colors.PrintInfo("🧹 Cleaning up old vehicle states...")
+
+	cutoffTime := config.GetCurrentTime().Add(-24 * time.Hour)
+	removedCount := 0
+
+	for imei, state := range vns.vehicleStates {
+		if state.LastUpdate.Before(cutoffTime) {
+			delete(vns.vehicleStates, imei)
+			removedCount++
+			colors.PrintInfo("🗑️ Removed old state for vehicle %s (last update: %s)", imei, state.LastUpdate.Format("2006-01-02 15:04:05"))
+		}
+	}
+
+	if removedCount > 0 {
+		colors.PrintSuccess("✅ Cleaned up %d old vehicle states", removedCount)
+	} else {
+		colors.PrintInfo("✅ No old vehicle states to clean up")
+	}
+}
+
+// GetVehicleStateInfo returns information about the current state of a vehicle
+func (vns *VehicleNotificationService) GetVehicleStateInfo(imei string) *VehicleState {
+	if state, exists := vns.vehicleStates[imei]; exists {
+		return state
+	}
+	return nil
+}
+
+// ResetVehicleState resets the state for a specific vehicle (useful for testing)
+func (vns *VehicleNotificationService) ResetVehicleState(imei string) {
+	if _, exists := vns.vehicleStates[imei]; exists {
+		delete(vns.vehicleStates, imei)
+		colors.PrintInfo("🔄 Reset state for vehicle %s", imei)
+	}
 }

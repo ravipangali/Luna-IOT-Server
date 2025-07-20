@@ -98,6 +98,9 @@ func (s *Server) Start() error {
 	// Start device timeout monitor
 	go s.monitorDeviceTimeouts()
 
+	// Start periodic cleanup of vehicle notification states
+	go s.cleanupVehicleNotificationStates()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -849,5 +852,20 @@ func (s *Server) removeDeviceConnection(imei string) {
 		colors.PrintConnection("📱", "Device %s marked as inactive", imei)
 	} else {
 		colors.PrintWarning("Attempted to remove non-existent device connection for IMEI %s", imei)
+	}
+}
+
+// cleanupVehicleNotificationStates periodically cleans up old vehicle notification states
+func (s *Server) cleanupVehicleNotificationStates() {
+	colors.PrintInfo("🧹 Starting vehicle notification state cleanup...")
+
+	// Run cleanup every 6 hours
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if s.vehicleNotificationService != nil {
+			s.vehicleNotificationService.CleanupOldVehicleStates()
+		}
 	}
 }
