@@ -193,6 +193,9 @@ func NewWebSocketHub() *WebSocketHub {
 func (h *WebSocketHub) Run() {
 	colors.PrintServer("🔗", "WebSocket Hub started - Ready for real-time connections")
 
+	// Start connection health monitoring
+	go h.monitorConnections()
+
 	for {
 		select {
 		case clientConn := <-h.register:
@@ -232,20 +235,66 @@ func (h *WebSocketHub) Run() {
 			imei := msg.Data.IMEI
 
 			// Send to authorized clients only
+			clientsToRemove := []*websocket.Conn{}
 			for client, clientInfo := range h.clients {
 				if clientInfo.IsAuthenticated && h.isClientAuthorizedForIMEI(clientInfo, imei) {
 					err := client.WriteMessage(websocket.TextMessage, message)
 					if err != nil {
 						colors.PrintError("Error sending WebSocket message to User ID %d: %v", clientInfo.UserID, err)
-						// The client is likely disconnected, so we unregister them
-						go func(c *websocket.Conn) {
-							h.unregister <- c
-						}(client)
+						// Mark client for removal
+						clientsToRemove = append(clientsToRemove, client)
+					} else {
+						// Update last activity on successful message send
+						clientInfo.LastActivity = time.Now()
 					}
 				}
 			}
+
+			// Remove disconnected clients
+			for _, client := range clientsToRemove {
+				colors.PrintConnection("📱", "Removing disconnected client for IMEI %s", imei)
+				go func(c *websocket.Conn) {
+					h.unregister <- c
+				}(client)
+			}
+
 			h.mutex.RUnlock()
 		}
+	}
+}
+
+// monitorConnections monitors connection health and cleans up stale connections
+func (h *WebSocketHub) monitorConnections() {
+	ticker := time.NewTicker(2 * time.Minute) // Check every 2 minutes
+	defer ticker.Stop()
+
+	for range ticker.C {
+		h.mutex.Lock()
+		now := time.Now()
+		staleConnections := []*websocket.Conn{}
+
+		for client, clientInfo := range h.clients {
+			// Consider connection stale if no activity for 5 minutes
+			if now.Sub(clientInfo.LastActivity) > 5*time.Minute {
+				colors.PrintWarning("Detected stale WebSocket connection for User ID %d (inactive for %v)",
+					clientInfo.UserID, now.Sub(clientInfo.LastActivity))
+				staleConnections = append(staleConnections, client)
+			}
+		}
+
+		// Remove stale connections
+		for _, client := range staleConnections {
+			colors.PrintConnection("🧹", "Cleaning up stale WebSocket connection")
+			delete(h.clients, client)
+			client.Close()
+		}
+
+		if len(staleConnections) > 0 {
+			colors.PrintInfo("Cleaned up %d stale WebSocket connections. Active clients: %d",
+				len(staleConnections), len(h.clients))
+		}
+
+		h.mutex.Unlock()
 	}
 }
 
@@ -572,8 +621,8 @@ func HandleWebSocket(c *gin.Context) {
 
 	// Check if token is valid (exists)
 	if !user.IsTokenValid() {
-		colors.PrintError("WebSocket connection attempted with invalid token")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		colors.PrintError("WebSocket connection attempted with expired token")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
 		return
 	}
 
@@ -594,6 +643,8 @@ func HandleWebSocket(c *gin.Context) {
 		}
 	}
 
+	colors.PrintConnection("🔗", "User ID %d has access to %d vehicles: %v", user.ID, len(accessibleIMEIs), accessibleIMEIs)
+
 	// Upgrade the HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -613,6 +664,8 @@ func HandleWebSocket(c *gin.Context) {
 	// Handle connection in a goroutine
 	go func() {
 		defer func() {
+			// Ensure proper cleanup
+			colors.PrintConnection("📱", "WebSocket cleanup for User ID %d", user.ID)
 			WSHub.unregister <- conn
 		}()
 
@@ -628,19 +681,46 @@ func HandleWebSocket(c *gin.Context) {
 		}
 
 		if welcomeData, err := json.Marshal(welcomeMsg); err == nil {
-			conn.WriteMessage(websocket.TextMessage, welcomeData)
+			if err := conn.WriteMessage(websocket.TextMessage, welcomeData); err != nil {
+				colors.PrintError("Failed to send welcome message to User ID %d: %v", user.ID, err)
+			}
 		}
+
+		// Set up ping/pong for connection health monitoring
+		conn.SetPongHandler(func(string) error {
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			return nil
+		})
 
 		// Keep connection alive and handle incoming messages
 		for {
-			_, _, err := conn.ReadMessage()
+			// Set read deadline to detect stale connections
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+			_, message, err := conn.ReadMessage()
 			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNoStatusReceived) {
 					colors.PrintError("WebSocket error for User ID %d: %v", user.ID, err)
+				} else {
+					colors.PrintConnection("📱", "WebSocket closed normally for User ID %d", user.ID)
 				}
 				break
 			}
-			// Handle incoming messages if needed (ping/pong, subscriptions, etc.)
+
+			// Handle ping messages
+			if string(message) == "ping" {
+				if err := conn.WriteMessage(websocket.TextMessage, []byte("pong")); err != nil {
+					colors.PrintError("Failed to send pong to User ID %d: %v", user.ID, err)
+					break
+				}
+			}
+
+			// Update last activity
+			WSHub.mutex.Lock()
+			if clientInfo, exists := WSHub.clients[conn]; exists {
+				clientInfo.LastActivity = time.Now()
+			}
+			WSHub.mutex.Unlock()
 		}
 	}()
 }

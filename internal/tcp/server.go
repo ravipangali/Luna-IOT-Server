@@ -812,7 +812,10 @@ func (s *Server) broadcastVehicleStatusFromGPS(imei string, gpsData *models.GPSD
 
 	// Broadcast vehicle status based on GPS data
 	if http.WSHub != nil {
+		colors.PrintConnection("📡", "Broadcasting vehicle status for IMEI %s: %s (%s)", imei, vehicleName, vehicleReg)
 		http.WSHub.BroadcastStatusUpdate(gpsData, vehicleName, vehicleReg)
+	} else {
+		colors.PrintWarning("WebSocket hub not available for broadcasting vehicle status")
 	}
 }
 
@@ -824,6 +827,7 @@ func (s *Server) updateDeviceActivity(imei string, conn net.Conn) {
 	if deviceConn, exists := s.deviceConnections[imei]; exists {
 		deviceConn.LastActivity = config.GetCurrentTime()
 		deviceConn.IsActive = true
+		colors.PrintConnection("📱", "Updated device activity for IMEI %s", imei)
 	} else {
 		s.deviceConnections[imei] = &DeviceConnection{
 			Conn:         conn,
@@ -831,6 +835,7 @@ func (s *Server) updateDeviceActivity(imei string, conn net.Conn) {
 			IMEI:         imei,
 			IsActive:     true,
 		}
+		colors.PrintConnection("📱", "Registered new device connection for IMEI %s", imei)
 	}
 }
 
@@ -842,5 +847,7 @@ func (s *Server) removeDeviceConnection(imei string) {
 	if deviceConn, exists := s.deviceConnections[imei]; exists {
 		deviceConn.IsActive = false
 		colors.PrintConnection("📱", "Device %s marked as inactive", imei)
+	} else {
+		colors.PrintWarning("Attempted to remove non-existent device connection for IMEI %s", imei)
 	}
 }
