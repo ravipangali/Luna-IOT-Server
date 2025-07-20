@@ -54,9 +54,9 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 
 	colors.PrintInfo("🚗 Vehicle found: %s (%s)", vehicle.Name, vehicle.RegNo)
 
-	// Get the latest valid GPS data from database for comparison (this data is already saved)
+	// Get the PREVIOUS valid GPS data from database for comparison (exclude current data being processed)
 	var lastGPSData models.GPSData
-	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != ''", gpsData.IMEI).
+	err := db.GetDB().Where("imei = ? AND ignition IS NOT NULL AND ignition != '' AND id != ?", gpsData.IMEI, gpsData.ID).
 		Order("timestamp DESC").
 		First(&lastGPSData).Error
 
@@ -115,12 +115,21 @@ func (vns *VehicleNotificationService) CheckAndSendVehicleNotifications(gpsData 
 
 		// Check for running (speed > 5)
 		if currentSpeed > 5 {
-			// Check if last speed was also > 5
-			if err != nil || (lastGPSData.Speed == nil || *lastGPSData.Speed <= 5) {
-				colors.PrintInfo("🏃 Vehicle started moving! Speed: %d km/h", currentSpeed)
+			// Get previous speed for comparison
+			var previousSpeed *int
+			if err == nil && lastGPSData.Speed != nil {
+				previousSpeed = lastGPSData.Speed
+				colors.PrintInfo("📊 Previous speed: %d km/h", *previousSpeed)
+			} else {
+				colors.PrintInfo("📝 No previous speed data found")
+			}
+
+			// Check if this is a transition from stopped (≤5) to moving (>5)
+			if err != nil || (previousSpeed == nil || *previousSpeed <= 5) {
+				colors.PrintInfo("🏃 Vehicle started moving! Speed: %d km/h (previous: %v)", currentSpeed, previousSpeed)
 				return vns.sendSpeedNotification(notificationData, NotificationTypeRunning, currentSpeed, 5)
 			} else {
-				colors.PrintInfo("⏭️ Vehicle already moving - skipping notification")
+				colors.PrintInfo("⏭️ Vehicle already moving (previous speed: %d km/h) - skipping notification", *previousSpeed)
 			}
 		}
 	}
