@@ -220,7 +220,7 @@ func (d *GT06Decoder) decodePacket(packet []byte) (*DecodedPacket, error) {
 
 	result := &DecodedPacket{
 		Raw:           strings.ToUpper(hex.EncodeToString(packet)),
-		Timestamp:     time.Now(),
+		Timestamp:     time.Now(), // Will be updated with GPS time if available
 		Length:        packet[2],
 		Protocol:      packet[protocolOffset],
 		ProtocolName:  d.getProtocolName(packet[protocolOffset]),
@@ -314,6 +314,8 @@ func (d *GT06Decoder) decodeGPSLBS(data []byte, result *DecodedPacket) {
 			day >= 1 && day <= 31 && hour <= 23 && minute <= 59 && second <= 59 {
 			gpsTime := time.Date(year, time.Month(month), day, hour, minute, second, 0, time.UTC)
 			result.GPSTime = &gpsTime
+			// Use GPS time as the main timestamp for the packet
+			result.Timestamp = gpsTime
 		}
 	}
 

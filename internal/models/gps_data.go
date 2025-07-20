@@ -68,6 +68,8 @@ func (GPSData) TableName() string {
 
 // BeforeCreate hook to set default values
 func (g *GPSData) BeforeCreate(tx *gorm.DB) error {
+	// Only set default timestamp if it's completely zero
+	// This allows GPS time from device to be preserved
 	if g.Timestamp.IsZero() {
 		g.Timestamp = time.Now()
 	}

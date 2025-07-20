@@ -562,9 +562,15 @@ func (s *Server) sendResponse(packet *protocol.DecodedPacket, conn net.Conn, dec
 
 // buildGPSData creates a GPSData model from a decoded packet
 func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
+	// Use GPS time from device if available, otherwise use packet timestamp
+	timestamp := packet.Timestamp
+	if packet.GPSTime != nil {
+		timestamp = *packet.GPSTime
+	}
+
 	gpsData := models.GPSData{
 		IMEI:         deviceIMEI,
-		Timestamp:    packet.Timestamp,
+		Timestamp:    timestamp, // Use device GPS time
 		ProtocolName: packet.ProtocolName,
 		RawPacket:    packet.Raw,
 	}
@@ -630,9 +636,15 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 
 // buildStatusData creates a GPSData model for status information
 func (s *Server) buildStatusData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
+	// Use GPS time from device if available, otherwise use packet timestamp
+	timestamp := packet.Timestamp
+	if packet.GPSTime != nil {
+		timestamp = *packet.GPSTime
+	}
+
 	statusData := models.GPSData{
 		IMEI:         deviceIMEI,
-		Timestamp:    packet.Timestamp,
+		Timestamp:    timestamp, // Use device GPS time
 		ProtocolName: packet.ProtocolName,
 		RawPacket:    packet.Raw,
 	}
