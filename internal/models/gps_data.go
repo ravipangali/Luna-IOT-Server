@@ -80,6 +80,34 @@ func (g *GPSData) IsValidLocation() bool {
 	return g.Latitude != nil && g.Longitude != nil
 }
 
+// IsValidForNepal checks if coordinates are within Nepal's boundaries
+func (g *GPSData) IsValidForNepal() bool {
+	if !g.IsValidLocation() {
+		return false
+	}
+
+	lat := *g.Latitude
+	lng := *g.Longitude
+
+	// Nepal coordinates: Lat: 26.3478° to 30.4465°, Lng: 80.0586° to 88.2014°
+	return lat >= 26.0 && lat <= 31.0 && lng >= 79.0 && lng <= 89.0
+}
+
+// HasGoodGPSAccuracy checks if GPS has good accuracy
+func (g *GPSData) HasGoodGPSAccuracy() bool {
+	// Check if GPS is positioned
+	if g.GPSPositioned != nil && !*g.GPSPositioned {
+		return false
+	}
+
+	// Check satellite count
+	if g.Satellites != nil && *g.Satellites < 3 {
+		return false
+	}
+
+	return true
+}
+
 // GetLocationString returns a formatted location string
 func (g *GPSData) GetLocationString() string {
 	if !g.IsValidLocation() {
