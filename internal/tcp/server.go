@@ -246,59 +246,51 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	lat := *packet.Latitude
 	lng := *packet.Longitude
 
-	// REMOVED: Incorrect latitude conversion - Nepal should have positive latitude
-	// if lat < 0 {
-	// 	lat = -lat
-	// 	packet.Latitude = &lat
-	// }
-
-	// Enhanced coordinate range validation for Nepal region
+	// FIXED: Enhanced coordinate range validation for Nepal region
 	// Nepal coordinates: Lat: 26.3478° to 30.4465°, Lng: 80.0586° to 88.2014°
-	if s.enableGPSValidation && (lat < 26.0 || lat > 31.0 || lng < 79.0 || lng > 89.0) {
+	// Made range more lenient to accept valid GPS data
+	if s.enableGPSValidation && (lat < 25.0 || lat > 31.5 || lng < 79.0 || lng > 89.5) {
 		colors.PrintWarning("📍 Invalid GPS coordinates (outside Nepal region): Lat=%.12f, Lng=%.12f", lat, lng)
 		return
 	}
 
-	// Enhanced GPS accuracy validation
-	if s.enableGPSValidation && packet.Satellites != nil && int(*packet.Satellites) < 2 {
-		colors.PrintWarning("📍 Poor GPS signal: Only %d satellites (min: 2)", *packet.Satellites)
+	// FIXED: Less strict GPS accuracy validation - accept any data with satellites >= 1
+	if s.enableGPSValidation && packet.Satellites != nil && int(*packet.Satellites) < 1 {
+		colors.PrintWarning("📍 Poor GPS signal: Only %d satellites (min: 1)", *packet.Satellites)
 		return
 	}
 
-	// Check if GPS is positioned - LESS STRICT: Accept if satellites >= 3 even if not positioned
+	// FIXED: Much more lenient GPS positioning check - accept if satellites >= 2 even if not positioned
 	if s.enableGPSValidation && packet.GPSPositioned != nil && !*packet.GPSPositioned {
-		// Only reject if we also have poor satellite signal
-		if packet.Satellites == nil || *packet.Satellites < 3 {
-			colors.PrintWarning("📍 GPS not positioned properly and poor satellite signal")
+		// Only reject if we also have very poor satellite signal
+		if packet.Satellites == nil || *packet.Satellites < 2 {
+			colors.PrintWarning("📍 GPS not positioned properly and very poor satellite signal")
 			return
 		}
-		// If we have good satellite signal (>=3), accept the GPS data even if not positioned
-		colors.PrintWarning("⚠️ GPS not positioned but good satellite signal (%d satellites) - accepting", *packet.Satellites)
+		// If we have decent satellite signal (>=2), accept the GPS data even if not positioned
+		colors.PrintInfo("⚠️ GPS not positioned but decent satellite signal (%d satellites) - accepting", *packet.Satellites)
 	}
 
 	colors.PrintData("🌍", "Processing GPS: Lat=%.12f, Lng=%.12f, Speed=%v km/h, Ignition=%s, Satellites=%v",
 		lat, lng, packet.Speed, packet.Ignition, packet.Satellites)
 
-	// Step 1: Check ignition status requirement (LESS STRICT)
-	shouldAcceptGPS := s.shouldAcceptGPSBasedOnIgnition(deviceIMEI, packet)
-	if !shouldAcceptGPS {
-		colors.PrintWarning("🚫 GPS rejected: Ignition is OFF - ignoring completely")
-		return
-	}
+	// FIXED: ALWAYS accept GPS data regardless of ignition status
+	// Real GPS systems should track vehicles even when ignition is off for route continuity
+	colors.PrintInfo("✅ GPS accepted: Ignition status=%s (accepting all GPS data for route continuity)", packet.Ignition)
 
-	// Step 2: Check for duplicate coordinates (INCREASED THRESHOLD)
+	// FIXED: Improved duplicate coordinates check with much larger threshold
 	if s.isDuplicateCoordinates(deviceIMEI, lat, lng) {
 		colors.PrintWarning("🚫 GPS rejected: Duplicate coordinates")
 		return
 	}
 
-	// Step 3: Check for erratic GPS (sudden large jumps or unrealistic paths)
+	// FIXED: More lenient erratic GPS check
 	if s.enableGPSValidation && s.isErraticGPS(deviceIMEI, lat, lng) {
 		colors.PrintWarning("🚫 GPS rejected: Erratic GPS coordinates")
 		return
 	}
 
-	// Smooth GPS coordinates
+	// FIXED: Less aggressive GPS smoothing to reduce zigzag lines
 	var smoothedLat, smoothedLng float64
 	if s.enableGPSSmoothing {
 		smoothedLat, smoothedLng = s.smoothGPSCoordinates(deviceIMEI, lat, lng)
@@ -320,13 +312,14 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 			colors.PrintInfo("🔔 Checking notifications BEFORE saving to database")
 			notificationError = s.vehicleNotificationService.CheckAndSendVehicleNotifications(&gpsData)
 			if notificationError != nil {
-				colors.PrintError("❌ Notification check failed: %v - NOT saving to database", notificationError)
-				return // Don't save to database if notification check fails
+				colors.PrintError("❌ Notification check failed: %v - STILL saving to database", notificationError)
+				// CHANGED: Don't block database save due to notification failures
+			} else {
+				colors.PrintSuccess("✅ Notification check completed successfully")
 			}
-			colors.PrintSuccess("✅ Notification check completed successfully")
 		}
 
-		// STEP 2: Save to database only if notification check succeeded
+		// STEP 2: Always save to database (don't block on notification failures)
 		if err := db.GetDB().Create(&gpsData).Error; err != nil {
 			colors.PrintError("Error saving GPS data: %v", err)
 		} else {
@@ -358,7 +351,7 @@ func (s *Server) shouldAcceptGPSBasedOnIgnition(imei string, packet *protocol.De
 	return true
 }
 
-// isDuplicateCoordinates checks if the coordinates are duplicate (within 5 meters)
+// isDuplicateCoordinates checks if the coordinates are duplicate (within larger threshold)
 func (s *Server) isDuplicateCoordinates(imei string, lat, lng float64) bool {
 	// Get the latest GPS data for this device
 	var latestGPS models.GPSData
@@ -373,9 +366,10 @@ func (s *Server) isDuplicateCoordinates(imei string, lat, lng float64) bool {
 	// Calculate distance between current and latest coordinates
 	distance := s.calculateDistance(lat, lng, *latestGPS.Latitude, *latestGPS.Longitude)
 
-	// If distance is less than 20 meters, consider it duplicate (increased from 5m)
-	if distance < 0.02 {
-		colors.PrintDebug("📍 Duplicate coordinates detected: Distance=%.3f km (threshold: 0.020 km)", distance)
+	// FIXED: Much more lenient duplicate threshold - only reject if distance is less than 1 meter
+	// This allows vehicles to be tracked even when parked or moving slowly
+	if distance < 0.001 { // 1 meter threshold
+		colors.PrintDebug("📍 Duplicate coordinates detected: Distance=%.6f km (threshold: 0.001 km)", distance)
 		return true
 	}
 
@@ -401,7 +395,7 @@ func (s *Server) calculateDistance(lat1, lng1, lat2, lng2 float64) float64 {
 	return R * c
 }
 
-// isErraticGPS checks if GPS coordinates are too erratic (sudden large jumps)
+// isErraticGPS checks if GPS coordinates are too erratic (sudden extremely large jumps)
 func (s *Server) isErraticGPS(imei string, lat, lng float64) bool {
 	// Get the last 3 GPS points for this device
 	var recentGPS []models.GPSData
@@ -417,68 +411,38 @@ func (s *Server) isErraticGPS(imei string, lat, lng float64) bool {
 	latestPoint := recentGPS[0]
 	distance := s.calculateDistance(lat, lng, *latestPoint.Latitude, *latestPoint.Longitude)
 
-	// If the jump is more than 3km in a single update, it's likely erratic (increased from 1km)
-	if distance > 3.0 {
-		colors.PrintWarning("📍 Erratic GPS detected: Jump of %.3f km (threshold: 3.000 km)", distance)
+	// FIXED: Much more lenient erratic GPS threshold - only reject if jump is more than 50km
+	// This prevents false positives when vehicles travel long distances
+	if distance > 50.0 {
+		colors.PrintWarning("📍 Erratic GPS detected: Jump of %.3f km (threshold: 50.000 km)", distance)
 		return true
 	}
 
-	// Check if the new point creates an unrealistic path
-	if len(recentGPS) >= 3 {
-		// Calculate the angle between the last two segments
-		// If the angle is too sharp (> 150 degrees), it might be erratic
-		prevPoint := recentGPS[1]
-
-		// Calculate vectors
-		vec1Lat := *latestPoint.Latitude - *prevPoint.Latitude
-		vec1Lng := *latestPoint.Longitude - *prevPoint.Longitude
-		vec2Lat := lat - *latestPoint.Latitude
-		vec2Lng := lng - *latestPoint.Longitude
-
-		// Calculate dot product
-		dotProduct := vec1Lat*vec2Lat + vec1Lng*vec2Lng
-		magnitude1 := math.Sqrt(vec1Lat*vec1Lat + vec1Lng*vec1Lng)
-		magnitude2 := math.Sqrt(vec2Lat*vec2Lat + vec2Lng*vec2Lng)
-
-		if magnitude1 > 0 && magnitude2 > 0 {
-			cosAngle := dotProduct / (magnitude1 * magnitude2)
-			// Clamp to [-1, 1] to avoid math domain errors
-			if cosAngle > 1 {
-				cosAngle = 1
-			} else if cosAngle < -1 {
-				cosAngle = -1
-			}
-			angle := math.Acos(cosAngle) * 180 / math.Pi
-
-			// If angle is greater than 150 degrees, it's likely erratic
-			if angle > 150 {
-				colors.PrintWarning("📍 Erratic GPS detected: Sharp angle of %.1f degrees", angle)
-				return true
-			}
-		}
-	}
+	// REMOVED: Sharp angle detection that was causing false positives
+	// Real vehicles can make sharp turns and this was rejecting valid GPS data
 
 	return false
 }
 
-// smoothGPSCoordinates applies simple smoothing to reduce zigzag patterns
+// smoothGPSCoordinates applies minimal smoothing to reduce noise without creating zigzag patterns
 func (s *Server) smoothGPSCoordinates(imei string, lat, lng float64) (float64, float64) {
-	// Get the last 2 GPS points for this device
+	// Get the last GPS point for this device
 	var recentGPS []models.GPSData
 	err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
-		imei).Order("timestamp DESC").Limit(2).Find(&recentGPS).Error
+		imei).Order("timestamp DESC").Limit(1).Find(&recentGPS).Error
 
 	if err != nil || len(recentGPS) < 1 {
 		// Not enough data for smoothing, return original coordinates
 		return lat, lng
 	}
 
-	// Simple moving average with configurable weight for new point
+	// FIXED: Much less aggressive smoothing to preserve route accuracy
 	prevLat := *recentGPS[0].Latitude
 	prevLng := *recentGPS[0].Longitude
 
-	// Apply smoothing with 90% weight for new point, 10% for previous (increased from 70/30)
-	weight := 0.9
+	// Apply minimal smoothing with 95% weight for new point, only 5% for previous
+	// This maintains route accuracy while reducing minor GPS noise
+	weight := 0.95
 	smoothedLat := weight*lat + (1-weight)*prevLat
 	smoothedLng := weight*lng + (1-weight)*prevLng
 
@@ -708,7 +672,8 @@ func (s *Server) isDuplicateStatusData(imei string, packet *protocol.DecodedPack
 func (s *Server) monitorDeviceTimeouts() {
 	colors.PrintInfo("⏰ Starting device timeout monitor...")
 
-	for range s.timeoutTicker.C {
+	// FIXED: More frequent monitoring for better responsiveness
+	for range time.Tick(30 * time.Second) { // Check every 30 seconds instead of 5 minutes
 		s.checkDevicesForInactiveStatus()
 	}
 }
@@ -722,7 +687,6 @@ func (s *Server) checkDevicesForInactiveStatus() {
 	}
 
 	now := config.GetCurrentTime()
-	oneHourAgo := now.Add(-time.Hour)
 
 	for _, device := range devices {
 		// Get latest GPS data for this device
@@ -733,21 +697,37 @@ func (s *Server) checkDevicesForInactiveStatus() {
 
 		if err != nil {
 			// No GPS data found at all - this is true "no data" case
-			// Device is registered but never sent any GPS data to database
 			colors.PrintWarning("📱 Device %s has no GPS data in database, broadcasting no-data status", device.IMEI)
 			s.broadcastNoDataStatus(device.IMEI)
 			continue
 		}
 
-		// ENHANCED FIX: Device has GPS data - always show vehicle status based on GPS data
-		// Check if GPS data is older than 1 hour to show "inactive"
-		if latestGPS.Timestamp.Before(oneHourAgo) {
-			// GPS data is older than 1 hour - show as inactive
-			colors.PrintInfo("📱 Device %s last GPS data is %v old, broadcasting inactive status (not no-data)",
-				device.IMEI, now.Sub(latestGPS.Timestamp))
+		// FIXED: More nuanced status determination based on recent activity
+		timeSinceLastUpdate := now.Sub(latestGPS.Timestamp)
+
+		if timeSinceLastUpdate > 30*time.Minute {
+			// GPS data is older than 30 minutes - show as inactive
+			colors.PrintInfo("📱 Device %s last GPS data is %v old, broadcasting inactive status",
+				device.IMEI, timeSinceLastUpdate)
 			s.broadcastInactiveStatusWithGPS(device.IMEI, &latestGPS)
+		} else if timeSinceLastUpdate > 5*time.Minute {
+			// GPS data is 5-30 minutes old - check if vehicle should be stopped
+			// If speed was > 0 but no recent updates, vehicle might be stopped
+			if latestGPS.Speed != nil && *latestGPS.Speed > 0 {
+				colors.PrintInfo("📱 Device %s was moving but no updates for %v - broadcasting stopped status",
+					device.IMEI, timeSinceLastUpdate)
+				// Create stopped GPS data
+				stoppedGPS := latestGPS
+				speed := 0
+				stoppedGPS.Speed = &speed
+				stoppedGPS.Ignition = "OFF"
+				s.broadcastVehicleStatusFromGPS(device.IMEI, &stoppedGPS)
+			} else {
+				// Vehicle was already stopped, just broadcast current status
+				s.broadcastVehicleStatusFromGPS(device.IMEI, &latestGPS)
+			}
 		} else {
-			// GPS data is recent (< 1 hour) - broadcast current vehicle status based on GPS data
+			// GPS data is recent (< 5 minutes) - broadcast current vehicle status
 			s.broadcastVehicleStatusFromGPS(device.IMEI, &latestGPS)
 		}
 	}

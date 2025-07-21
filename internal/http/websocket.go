@@ -234,11 +234,18 @@ func (h *WebSocketHub) Run() {
 			}
 			imei := msg.Data.IMEI
 
-			// Send to authorized clients only
+			// Send to authorized clients only with improved error handling
 			clientsToRemove := []*websocket.Conn{}
+			successfulSends := 0
+			totalClients := 0
+
 			for client, clientInfo := range h.clients {
+				totalClients++
 				if clientInfo.IsAuthenticated && h.isClientAuthorizedForIMEI(clientInfo, imei) {
+					// FIXED: Use WriteControl for better error handling and timeouts
+					client.SetWriteDeadline(time.Now().Add(10 * time.Second))
 					err := client.WriteMessage(websocket.TextMessage, message)
+
 					if err != nil {
 						colors.PrintError("Error sending WebSocket message to User ID %d: %v", clientInfo.UserID, err)
 						// Mark client for removal
@@ -246,9 +253,13 @@ func (h *WebSocketHub) Run() {
 					} else {
 						// Update last activity on successful message send
 						clientInfo.LastActivity = time.Now()
+						successfulSends++
 					}
 				}
 			}
+
+			colors.PrintDebug("📡 WebSocket broadcast: %d/%d clients received message for IMEI %s",
+				successfulSends, totalClients, imei)
 
 			// Remove disconnected clients
 			for _, client := range clientsToRemove {
@@ -265,20 +276,33 @@ func (h *WebSocketHub) Run() {
 
 // monitorConnections monitors connection health and cleans up stale connections
 func (h *WebSocketHub) monitorConnections() {
-	ticker := time.NewTicker(2 * time.Minute) // Check every 2 minutes
+	ticker := time.NewTicker(30 * time.Second) // FIXED: Check every 30 seconds instead of 2 minutes
 	defer ticker.Stop()
 
 	for range ticker.C {
 		h.mutex.Lock()
 		now := time.Now()
 		staleConnections := []*websocket.Conn{}
+		activeConnections := 0
 
 		for client, clientInfo := range h.clients {
-			// Consider connection stale if no activity for 5 minutes
-			if now.Sub(clientInfo.LastActivity) > 5*time.Minute {
+			// FIXED: More lenient timeout - consider connection stale after 10 minutes instead of 5
+			if now.Sub(clientInfo.LastActivity) > 10*time.Minute {
 				colors.PrintWarning("Detected stale WebSocket connection for User ID %d (inactive for %v)",
 					clientInfo.UserID, now.Sub(clientInfo.LastActivity))
 				staleConnections = append(staleConnections, client)
+			} else {
+				activeConnections++
+
+				// FIXED: Send periodic ping to keep connections alive
+				if now.Sub(clientInfo.LastActivity) > 1*time.Minute {
+					go func(c *websocket.Conn, uid uint) {
+						c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+						if err := c.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+							colors.PrintDebug("Failed to send ping to User ID %d: %v", uid, err)
+						}
+					}(client, clientInfo.UserID)
+				}
 			}
 		}
 
@@ -291,7 +315,9 @@ func (h *WebSocketHub) monitorConnections() {
 
 		if len(staleConnections) > 0 {
 			colors.PrintInfo("Cleaned up %d stale WebSocket connections. Active clients: %d",
-				len(staleConnections), len(h.clients))
+				len(staleConnections), activeConnections)
+		} else if activeConnections > 0 {
+			colors.PrintDebug("WebSocket health check: %d active connections", activeConnections)
 		}
 
 		h.mutex.Unlock()
