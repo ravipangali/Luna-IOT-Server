@@ -237,7 +237,60 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	// Update device activity
 	s.updateDeviceActivity(deviceIMEI, conn)
 
-	// Validate GPS data exists
+	// Check if we should filter out location data based on ignition and speed
+	shouldFilterLocation := false
+	var speed int
+
+	// Extract speed if available
+	if packet.Speed != nil {
+		speed = int(*packet.Speed)
+	}
+
+	// Filter conditions: ignition OFF or speed < 5
+	if packet.Ignition == "OFF" {
+		shouldFilterLocation = true
+		colors.PrintWarning("🚫 Filtering location data: Ignition is OFF")
+	} else if speed < 5 {
+		shouldFilterLocation = true
+		colors.PrintWarning("🚫 Filtering location data: Speed (%d km/h) is less than 5", speed)
+	}
+
+	// If filtering location, save only status data without coordinates
+	if shouldFilterLocation {
+		colors.PrintInfo("📍 Saving status data only (no GPS coordinates) for device %s", deviceIMEI)
+
+		if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
+			// Build GPS data without location information
+			gpsData := s.buildFilteredGPSData(packet, deviceIMEI)
+
+			// STEP 1: Check and send vehicle notifications FIRST (before saving to database)
+			var notificationError error
+			if s.vehicleNotificationService != nil {
+				colors.PrintInfo("🔔 Checking notifications BEFORE saving to database")
+				notificationError = s.vehicleNotificationService.CheckAndSendVehicleNotifications(&gpsData)
+				if notificationError != nil {
+					colors.PrintError("❌ Notification check failed: %v - STILL saving to database", notificationError)
+				} else {
+					colors.PrintSuccess("✅ Notification check completed successfully")
+				}
+			}
+
+			// STEP 2: Save filtered data to database
+			if err := db.GetDB().Create(&gpsData).Error; err != nil {
+				colors.PrintError("Error saving filtered GPS data: %v", err)
+			} else {
+				colors.PrintSuccess("✅ Filtered GPS data (status only) saved for device %s", deviceIMEI)
+
+				// STEP 3: Broadcast status update only (no location)
+				if http.WSHub != nil {
+					go http.WSHub.BroadcastStatusUpdate(&gpsData, "", "")
+				}
+			}
+		}
+		return
+	}
+
+	// Validate GPS data exists (only when not filtering)
 	if packet.Latitude == nil || packet.Longitude == nil {
 		colors.PrintWarning("⚠️ Skipping GPS: Missing coordinates (Lat=%v, Lng=%v)", packet.Latitude, packet.Longitude)
 		return
@@ -274,9 +327,8 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	colors.PrintData("🌍", "Processing GPS: Lat=%.12f, Lng=%.12f, Speed=%v km/h, Ignition=%s, Satellites=%v",
 		lat, lng, packet.Speed, packet.Ignition, packet.Satellites)
 
-	// FIXED: ALWAYS accept GPS data regardless of ignition status
-	// Real GPS systems should track vehicles even when ignition is off for route continuity
-	colors.PrintInfo("✅ GPS accepted: Ignition status=%s (accepting all GPS data for route continuity)", packet.Ignition)
+	// GPS accepted with full location data
+	colors.PrintInfo("✅ GPS accepted with location data: Ignition=%s, Speed=%d km/h", packet.Ignition, speed)
 
 	// FIXED: Improved duplicate coordinates check with much larger threshold
 	if s.isDuplicateCoordinates(deviceIMEI, lat, lng) {
@@ -465,25 +517,51 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 		return
 	}
 
+	// Check if we should filter out location data based on ignition and speed
+	shouldFilterLocation := false
+	var speed int
+
+	// Extract speed if available
+	if packet.Speed != nil {
+		speed = int(*packet.Speed)
+	}
+
+	// Filter conditions: ignition OFF or speed < 5
+	if packet.Ignition == "OFF" {
+		shouldFilterLocation = true
+		colors.PrintWarning("🚫 Filtering location data in status packet: Ignition is OFF")
+	} else if speed < 5 {
+		shouldFilterLocation = true
+		colors.PrintWarning("🚫 Filtering location data in status packet: Speed (%d km/h) is less than 5", speed)
+	}
+
 	// Save status data to database and broadcast to WebSocket clients
 	if deviceIMEI != "" && s.isDeviceRegistered(deviceIMEI) {
-		// Get the latest GPS data for this device to preserve location
-		var latestGPS models.GPSData
-		hasLatestGPS := false
-		if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
-			deviceIMEI).Order("timestamp DESC").First(&latestGPS).Error; err == nil {
-			hasLatestGPS = true
-		}
+		var statusData models.GPSData
 
-		statusData := s.buildStatusData(packet, deviceIMEI)
+		if shouldFilterLocation {
+			// Build filtered status data without location information
+			statusData = s.buildFilteredGPSData(packet, deviceIMEI)
+			colors.PrintInfo("📍 Building filtered status data (no location) for device %s", deviceIMEI)
+		} else {
+			// Get the latest GPS data for this device to preserve location
+			var latestGPS models.GPSData
+			hasLatestGPS := false
+			if err := db.GetDB().Where("imei = ? AND latitude IS NOT NULL AND longitude IS NOT NULL",
+				deviceIMEI).Order("timestamp DESC").First(&latestGPS).Error; err == nil {
+				hasLatestGPS = true
+			}
 
-		// Preserve latest GPS coordinates if status packet doesn't have them
-		if !hasLatestGPS && packet.Latitude == nil && packet.Longitude == nil {
-			if hasLatestGPS {
-				statusData.Latitude = latestGPS.Latitude
-				statusData.Longitude = latestGPS.Longitude
-				statusData.Speed = latestGPS.Speed
-				statusData.Course = latestGPS.Course
+			statusData = s.buildStatusData(packet, deviceIMEI)
+
+			// Preserve latest GPS coordinates if status packet doesn't have them
+			if !hasLatestGPS && packet.Latitude == nil && packet.Longitude == nil {
+				if hasLatestGPS {
+					statusData.Latitude = latestGPS.Latitude
+					statusData.Longitude = latestGPS.Longitude
+					statusData.Speed = latestGPS.Speed
+					statusData.Course = latestGPS.Course
+				}
 			}
 		}
 
@@ -503,7 +581,11 @@ func (s *Server) handleStatusPacket(packet *protocol.DecodedPacket, conn net.Con
 		if err := db.GetDB().Create(&statusData).Error; err != nil {
 			colors.PrintError("Error saving status data: %v", err)
 		} else {
-			colors.PrintSuccess("✅ Status data saved for device %s", deviceIMEI)
+			if shouldFilterLocation {
+				colors.PrintSuccess("✅ Filtered status data (no location) saved for device %s", deviceIMEI)
+			} else {
+				colors.PrintSuccess("✅ Status data saved for device %s", deviceIMEI)
+			}
 
 			// Broadcast status update to WebSocket clients
 			if http.WSHub != nil {
@@ -594,6 +676,87 @@ func (s *Server) buildGPSData(packet *protocol.DecodedPacket, deviceIMEI string)
 	if packet.CellID != nil {
 		cellID := int(*packet.CellID)
 		gpsData.CellID = &cellID
+	}
+
+	return gpsData
+}
+
+// buildFilteredGPSData creates a GPSData model without location information (ignition OFF or speed < 5)
+func (s *Server) buildFilteredGPSData(packet *protocol.DecodedPacket, deviceIMEI string) models.GPSData {
+	// Use GPS time from device if available, otherwise use packet timestamp
+	timestamp := packet.Timestamp
+	if packet.GPSTime != nil {
+		timestamp = *packet.GPSTime
+	}
+
+	gpsData := models.GPSData{
+		IMEI:         deviceIMEI,
+		Timestamp:    timestamp,
+		ProtocolName: packet.ProtocolName,
+		RawPacket:    packet.Raw,
+	}
+
+	// EXPLICITLY DO NOT include location data:
+	// - Latitude = nil
+	// - Longitude = nil
+	// - Speed = nil
+	// - Course = nil
+	// - Altitude = nil
+
+	// Include GPS status (but not location)
+	if packet.Satellites != nil {
+		satellites := int(*packet.Satellites)
+		gpsData.Satellites = &satellites
+	}
+	if packet.GPSRealTime != nil {
+		gpsData.GPSRealTime = packet.GPSRealTime
+	}
+	if packet.GPSPositioned != nil {
+		gpsData.GPSPositioned = packet.GPSPositioned
+	}
+
+	// Include device status information
+	gpsData.Ignition = packet.Ignition
+	gpsData.Charger = packet.Charger
+	gpsData.GPSTracking = packet.GPSTracking
+	gpsData.OilElectricity = packet.OilElectricity
+	gpsData.DeviceStatus = packet.DeviceStatus
+
+	// Include signal and power information
+	if packet.Voltage != nil {
+		voltageLevel := int(packet.Voltage.Level)
+		gpsData.VoltageLevel = &voltageLevel
+		gpsData.VoltageStatus = packet.Voltage.Status
+	}
+	if packet.GSMSignal != nil {
+		gsmSignal := int(packet.GSMSignal.Level)
+		gpsData.GSMSignal = &gsmSignal
+		gpsData.GSMStatus = packet.GSMSignal.Status
+	}
+
+	// Include LBS data (cell tower information) - this is not GPS location
+	if packet.MCC != nil {
+		mcc := int(*packet.MCC)
+		gpsData.MCC = &mcc
+	}
+	if packet.MNC != nil {
+		mnc := int(*packet.MNC)
+		gpsData.MNC = &mnc
+	}
+	if packet.LAC != nil {
+		lac := int(*packet.LAC)
+		gpsData.LAC = &lac
+	}
+	if packet.CellID != nil {
+		cellID := int(*packet.CellID)
+		gpsData.CellID = &cellID
+	}
+
+	// Include alarm information
+	if packet.Alarm != nil {
+		gpsData.AlarmActive = packet.Alarm.Active
+		gpsData.AlarmType = packet.Alarm.Type
+		gpsData.AlarmCode = packet.Alarm.Code
 	}
 
 	return gpsData
