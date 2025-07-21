@@ -260,8 +260,8 @@ func (s *Server) handleGPSPacket(packet *protocol.DecodedPacket, conn net.Conn, 
 	}
 
 	// Enhanced GPS accuracy validation
-	if s.enableGPSValidation && packet.Satellites != nil && *packet.Satellites < 3 {
-		colors.PrintWarning("📍 Poor GPS signal: Only %d satellites", *packet.Satellites)
+	if s.enableGPSValidation && packet.Satellites != nil && int(*packet.Satellites) < 2 {
+		colors.PrintWarning("📍 Poor GPS signal: Only %d satellites (min: 2)", *packet.Satellites)
 		return
 	}
 
@@ -373,9 +373,9 @@ func (s *Server) isDuplicateCoordinates(imei string, lat, lng float64) bool {
 	// Calculate distance between current and latest coordinates
 	distance := s.calculateDistance(lat, lng, *latestGPS.Latitude, *latestGPS.Longitude)
 
-	// If distance is less than 5 meters, consider it duplicate (reduced from 10m)
-	if distance < 0.005 { // 5 meters = 0.005 km
-		colors.PrintDebug("📍 Duplicate coordinates detected: Distance=%.3f km", distance)
+	// If distance is less than 20 meters, consider it duplicate (increased from 5m)
+	if distance < 0.02 {
+		colors.PrintDebug("📍 Duplicate coordinates detected: Distance=%.3f km (threshold: 0.020 km)", distance)
 		return true
 	}
 
@@ -417,9 +417,9 @@ func (s *Server) isErraticGPS(imei string, lat, lng float64) bool {
 	latestPoint := recentGPS[0]
 	distance := s.calculateDistance(lat, lng, *latestPoint.Latitude, *latestPoint.Longitude)
 
-	// If the jump is more than 1km in a single update, it's likely erratic
-	if distance > 1.0 {
-		colors.PrintWarning("📍 Erratic GPS detected: Jump of %.3f km", distance)
+	// If the jump is more than 3km in a single update, it's likely erratic (increased from 1km)
+	if distance > 3.0 {
+		colors.PrintWarning("📍 Erratic GPS detected: Jump of %.3f km (threshold: 3.000 km)", distance)
 		return true
 	}
 
@@ -473,13 +473,14 @@ func (s *Server) smoothGPSCoordinates(imei string, lat, lng float64) (float64, f
 		return lat, lng
 	}
 
-	// Simple moving average with 70% weight for new point, 30% for previous
+	// Simple moving average with configurable weight for new point
 	prevLat := *recentGPS[0].Latitude
 	prevLng := *recentGPS[0].Longitude
 
-	// Apply smoothing
-	smoothedLat := 0.7*lat + 0.3*prevLat
-	smoothedLng := 0.7*lng + 0.3*prevLng
+	// Apply smoothing with 90% weight for new point, 10% for previous (increased from 70/30)
+	weight := 0.9
+	smoothedLat := weight*lat + (1-weight)*prevLat
+	smoothedLng := weight*lng + (1-weight)*prevLng
 
 	colors.PrintDebug("📍 GPS smoothing: Original(%.12f,%.12f) -> Smoothed(%.12f,%.12f)",
 		lat, lng, smoothedLat, smoothedLng)
